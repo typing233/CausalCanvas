@@ -605,7 +605,6 @@ textarea:focus {
 }
 
 .root-node {
-    position: relative;
     border-color: #10b981 !important;
     box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
 }
@@ -623,7 +622,6 @@ textarea:focus {
 }
 
 .result-node {
-    position: relative;
     border-color: #f59e0b !important;
     box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3);
 }
@@ -641,7 +639,6 @@ textarea:focus {
 }
 
 .cycle-node {
-    position: relative;
     border-color: #ef4444 !important;
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3);
     animation: pulse-danger 2s infinite;
