@@ -644,7 +644,7 @@ class CausalCanvasApp {
     }
     
     clearCanvas() {
-        if (this.nodes.length === 0) {
+        if (this.nodes.length === 0 && this.edges.length === 0) {
             this.showToast('画布已是空的', 'error');
             return;
         }
@@ -653,10 +653,19 @@ class CausalCanvasApp {
         this.edges = [];
         this.nodesContainer.innerHTML = '';
         
-        const lines = this.edgesSvg.querySelectorAll('g');
-        lines.forEach(line => line.remove());
+        this.isConnecting = false;
+        this.connectionStart = null;
+        this.pendingEdge = null;
+        this.tempLine = null;
+        
+        const defs = this.edgesSvg.querySelector('defs');
+        this.edgesSvg.innerHTML = '';
+        if (defs) {
+            this.edgesSvg.appendChild(defs);
+        }
         
         this.updateCounts();
+        this.hideRelationSelector();
         this.showToast('画布已清空', 'success');
     }
     
