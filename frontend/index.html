@@ -46,6 +46,14 @@
                         <span id="nodeCount">节点: 0</span>
                         <span id="edgeCount">连线: 0</span>
                     </div>
+                    <div class="toolbar-middle">
+                        <button id="analyzeGraphBtn" class="btn btn-sm btn-primary">📊 分析结构</button>
+                        <button id="clearAnalysisBtn" class="btn btn-sm btn-secondary">清除标记</button>
+                        <div class="toolbar-divider"></div>
+                        <button id="highlightDownstreamBtn" class="btn btn-sm btn-info">🔽 高亮下游</button>
+                        <button id="highlightUpstreamBtn" class="btn btn-sm btn-info">🔼 高亮上游</button>
+                        <button id="clearHighlightBtn" class="btn btn-sm btn-secondary">清除高亮</button>
+                    </div>
                     <div class="toolbar-right">
                         <button id="clearCanvasBtn" class="btn btn-sm btn-danger">清空画布</button>
                         <button id="generateReportBtn" class="btn btn-sm btn-success">📄 生成报告</button>
@@ -78,8 +86,56 @@
             <aside class="sidebar right-sidebar" id="reportSidebar" style="display: none;">
                 <div class="sidebar-section">
                     <h3>📄 生成的报告</h3>
+                    
+                    <div class="ai-config-section" id="aiConfigSection" style="display: none;">
+                        <div class="config-group">
+                            <label for="deepseekApiKey">DeepSeek API Key:</label>
+                            <input type="password" id="deepseekApiKey" placeholder="sk-..." class="config-input">
+                        </div>
+                        <div class="config-group">
+                            <label for="deepseekModel">模型选择:</label>
+                            <select id="deepseekModel" class="config-input">
+                                <option value="deepseek-chat">deepseek-chat</option>
+                                <option value="deepseek-reasoner">deepseek-reasoner</option>
+                            </select>
+                        </div>
+                        <button id="saveAiConfigBtn" class="btn btn-sm btn-primary">保存配置</button>
+                    </div>
+                    
+                    <div class="report-toolbar">
+                        <button id="toggleAiConfigBtn" class="btn btn-sm btn-secondary">⚙️ AI配置</button>
+                        <button id="aiGenerateReportBtn" class="btn btn-sm btn-success">🤖 AI生成报告</button>
+                    </div>
+                    
                     <div id="reportContent" class="report-content"></div>
+                    
+                    <div class="rewrite-section" id="rewriteSection" style="display: none;">
+                        <div class="config-group">
+                            <label>改写风格:</label>
+                            <select id="rewriteStyle" class="config-input">
+                                <option value="formal">正式专业</option>
+                                <option value="casual">轻松通俗</option>
+                                <option value="academic">学术严谨</option>
+                                <option value="creative">创意生动</option>
+                            </select>
+                        </div>
+                        <div class="config-group">
+                            <label>目标节点扩写:</label>
+                            <select id="expandNode" class="config-input">
+                                <option value="">-- 选择节点 --</option>
+                            </select>
+                        </div>
+                        <div class="rewrite-buttons">
+                            <button id="rewriteSelectedBtn" class="btn btn-sm btn-primary">✏️ 改写选中文本</button>
+                            <button id="expandNodeBtn" class="btn btn-sm btn-info">📝 扩写节点</button>
+                            <button id="cancelRewriteBtn" class="btn btn-sm btn-secondary">取消</button>
+                        </div>
+                    </div>
+                    
                     <div class="report-actions">
+                        <button id="toggleRewriteBtn" class="btn btn-secondary">
+                            ✏️ 改写模式
+                        </button>
                         <button id="copyReportBtn" class="btn btn-primary">
                             📋 一键复制
                         </button>

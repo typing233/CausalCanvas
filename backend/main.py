@@ -7,11 +7,14 @@ import jieba
 import jieba.posseg as pseg
 import re
 import os
+import httpx
 
 app = FastAPI(title="CausalCanvas - 交互式知识重构工具")
 
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 app.mount("/static", StaticFiles(directory=frontend_path), name="static")
+
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
 
 class TextInput(BaseModel):
@@ -41,6 +44,27 @@ class GraphData(BaseModel):
 class ReportRequest(BaseModel):
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
+
+
+class AIReportRequest(BaseModel):
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+    api_key: str
+    model: str = "deepseek-chat"
+
+
+class AIRewriteRequest(BaseModel):
+    text: str
+    style: str
+    api_key: str
+    model: str = "deepseek-chat"
+
+
+class AIExpandRequest(BaseModel):
+    node_label: str
+    context: str
+    api_key: str
+    model: str = "deepseek-chat"
 
 
 class ExtractedEntity(BaseModel):
@@ -242,6 +266,199 @@ async def generate_report(data: ReportRequest):
     full_report = "".join(report_parts)
 
     return {"report": full_report}
+
+
+async def call_deepseek_api(
+    api_key: str,
+    model: str,
+    messages: List[Dict[str, str]],
+    temperature: float = 0.7
+) -> str:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature
+    }
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            response = await client.post(
+                DEEPSEEK_API_URL,
+                json=payload,
+                headers=headers
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"DeepSeek API错误: {e.response.text}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"调用DeepSeek API失败: {str(e)}"
+            )
+
+
+@app.post("/api/ai-generate-report")
+async def ai_generate_report(data: AIReportRequest):
+    if not data.api_key:
+        raise HTTPException(status_code=400, detail="请提供DeepSeek API Key")
+    
+    nodes = data.nodes
+    edges = data.edges
+    
+    if not nodes:
+        return {"report": "画布上没有节点，请先添加节点。"}
+    
+    node_dict = {node["id"]: node for node in nodes}
+    
+    graph_description = "以下是因果图谱中的节点和关系：\n\n"
+    
+    graph_description += "【节点列表】\n"
+    for node in nodes:
+        node_type = node.get("type", "unknown")
+        type_label = {
+            "person": "人物",
+            "event": "事件",
+            "noun": "概念"
+        }.get(node_type, "其他")
+        graph_description += f"- {node['label']} ({type_label})\n"
+    
+    if edges:
+        graph_description += "\n【关系连线】\n"
+        for edge in edges:
+            source_id = edge.get("source")
+            target_id = edge.get("target")
+            relation = edge.get("relation", "影响")
+            
+            if source_id in node_dict and target_id in node_dict:
+                source_label = node_dict[source_id]["label"]
+                target_label = node_dict[target_id]["label"]
+                graph_description += f"- {source_label} {relation} {target_label}\n"
+    
+    system_prompt = """你是一位专业的知识分析师和报告撰写专家。请根据用户提供的因果图谱数据，生成一份结构清晰、逻辑严谨的分析报告。
+
+报告要求：
+1. 首先概述图谱中的主要元素（人物、事件、概念）
+2. 详细分析各节点之间的因果关系和逻辑链条
+3. 识别关键的根因节点和结果节点
+4. 如果存在循环因果关系，请特别指出并分析其影响
+5. 语言风格要专业、清晰、易于理解
+6. 报告结构要有条理，使用适当的标题和分段
+
+请用中文撰写报告，字数在300-800字之间。"""
+
+    user_prompt = f"请根据以下因果图谱数据生成一份分析报告：\n\n{graph_description}\n\n请生成完整的分析报告。"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    try:
+        report = await call_deepseek_api(
+            api_key=data.api_key,
+            model=data.model,
+            messages=messages
+        )
+        return {"report": report}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成报告失败: {str(e)}")
+
+
+@app.post("/api/ai-rewrite")
+async def ai_rewrite(data: AIRewriteRequest):
+    if not data.api_key:
+        raise HTTPException(status_code=400, detail="请提供DeepSeek API Key")
+    
+    if not data.text.strip():
+        raise HTTPException(status_code=400, detail="请提供需要改写的文本")
+    
+    style_descriptions = {
+        "formal": "正式专业的商务风格，用词严谨、规范，适合正式报告和文档",
+        "casual": "轻松通俗的口语化风格，用词简单、亲切，适合日常交流",
+        "academic": "学术严谨的学术风格，逻辑严密、术语准确，适合学术论文",
+        "creative": "创意生动的文学风格，富有想象力和感染力，适合创意写作"
+    }
+    
+    style_desc = style_descriptions.get(data.style, style_descriptions["formal"])
+    
+    system_prompt = f"""你是一位专业的文本改写专家。请将用户提供的文本改写成{style_desc}。
+
+改写要求：
+1. 保持原文的核心意思不变
+2. 调整用词和句式，使其符合指定的风格
+3. 可以适当增加连接词和过渡语，使文本更加流畅
+4. 保持原文的结构和逻辑
+5. 用中文输出改写后的文本"""
+
+    user_prompt = f"请改写以下文本：\n\n{data.text}\n\n改写后的文本："
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    try:
+        rewritten_text = await call_deepseek_api(
+            api_key=data.api_key,
+            model=data.model,
+            messages=messages
+        )
+        return {"rewritten_text": rewritten_text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"改写失败: {str(e)}")
+
+
+@app.post("/api/ai-expand")
+async def ai_expand(data: AIExpandRequest):
+    if not data.api_key:
+        raise HTTPException(status_code=400, detail="请提供DeepSeek API Key")
+    
+    if not data.node_label.strip():
+        raise HTTPException(status_code=400, detail="请提供需要扩写的节点名称")
+    
+    system_prompt = """你是一位专业的知识扩展专家。请根据用户提供的节点名称和上下文，对该节点进行详细的扩写说明。
+
+扩写要求：
+1. 介绍该节点的基本定义和概念
+2. 分析该节点在整个因果关系中的地位和作用
+3. 可以补充相关的背景知识和扩展信息
+4. 语言要清晰、准确、有条理
+5. 用中文输出，字数在150-300字之间"""
+
+    context_info = f"\n\n上下文信息：{data.context}" if data.context else ""
+    
+    user_prompt = f"请详细扩写以下节点：{data.node_label}{context_info}\n\n扩写内容："
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    try:
+        expanded_text = await call_deepseek_api(
+            api_key=data.api_key,
+            model=data.model,
+            messages=messages
+        )
+        return {"expanded_text": expanded_text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"扩写失败: {str(e)}")
 
 
 if __name__ == "__main__":
