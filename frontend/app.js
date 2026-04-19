@@ -17,6 +17,15 @@ class CausalCanvasApp {
         this.nodeIdCounter = 0;
         this.edgeIdCounter = 0;
         
+        this.highlightedNodes = new Set();
+        this.highlightedEdges = new Set();
+        this.rootNodes = new Set();
+        this.resultNodes = new Set();
+        this.cycles = [];
+        
+        this.deepseekApiKey = '';
+        this.deepseekModel = 'deepseek-chat';
+        
         this.init();
     }
     
@@ -25,6 +34,7 @@ class CausalCanvasApp {
         this.bindEvents();
         this.initSvgDefs();
         this.updateCounts();
+        this.loadAiConfig();
     }
     
     cacheElements() {
@@ -43,6 +53,12 @@ class CausalCanvasApp {
         this.clearCanvasBtn = document.getElementById('clearCanvasBtn');
         this.generateReportBtn = document.getElementById('generateReportBtn');
         
+        this.analyzeGraphBtn = document.getElementById('analyzeGraphBtn');
+        this.clearAnalysisBtn = document.getElementById('clearAnalysisBtn');
+        this.highlightDownstreamBtn = document.getElementById('highlightDownstreamBtn');
+        this.highlightUpstreamBtn = document.getElementById('highlightUpstreamBtn');
+        this.clearHighlightBtn = document.getElementById('clearHighlightBtn');
+        
         this.relationSelector = document.getElementById('relationSelector');
         this.cancelRelationBtn = document.getElementById('cancelRelation');
         this.relationBtns = document.querySelectorAll('.relation-btn');
@@ -51,6 +67,23 @@ class CausalCanvasApp {
         this.reportContent = document.getElementById('reportContent');
         this.copyReportBtn = document.getElementById('copyReportBtn');
         this.closeReportBtn = document.getElementById('closeReportBtn');
+        
+        this.aiConfigSection = document.getElementById('aiConfigSection');
+        this.toggleAiConfigBtn = document.getElementById('toggleAiConfigBtn');
+        this.deepseekApiKeyInput = document.getElementById('deepseekApiKey');
+        this.deepseekModelSelect = document.getElementById('deepseekModel');
+        this.saveAiConfigBtn = document.getElementById('saveAiConfigBtn');
+        this.aiGenerateReportBtn = document.getElementById('aiGenerateReportBtn');
+        
+        this.rewriteSection = document.getElementById('rewriteSection');
+        this.toggleRewriteBtn = document.getElementById('toggleRewriteBtn');
+        this.rewriteStyleSelect = document.getElementById('rewriteStyle');
+        this.expandNodeSelect = document.getElementById('expandNode');
+        this.rewriteSelectedBtn = document.getElementById('rewriteSelectedBtn');
+        this.expandNodeBtn = document.getElementById('expandNodeBtn');
+        this.cancelRewriteBtn = document.getElementById('cancelRewriteBtn');
+        
+        this.isRewriteMode = false;
         
         this.toast = document.getElementById('toast');
     }
@@ -65,6 +98,12 @@ class CausalCanvasApp {
         this.clearCanvasBtn.addEventListener('click', () => this.clearCanvas());
         this.generateReportBtn.addEventListener('click', () => this.generateReport());
         
+        this.analyzeGraphBtn.addEventListener('click', () => this.analyzeGraphStructure());
+        this.clearAnalysisBtn.addEventListener('click', () => this.clearGraphAnalysis());
+        this.highlightDownstreamBtn.addEventListener('click', () => this.highlightDownstreamPath());
+        this.highlightUpstreamBtn.addEventListener('click', () => this.highlightUpstreamPath());
+        this.clearHighlightBtn.addEventListener('click', () => this.clearHighlights());
+        
         this.cancelRelationBtn.addEventListener('click', () => this.cancelConnection());
         this.relationBtns.forEach(btn => {
             btn.addEventListener('click', () => this.confirmRelation(btn.dataset.relation));
@@ -72,6 +111,15 @@ class CausalCanvasApp {
         
         this.copyReportBtn.addEventListener('click', () => this.copyReport());
         this.closeReportBtn.addEventListener('click', () => this.closeReport());
+        
+        this.toggleAiConfigBtn.addEventListener('click', () => this.toggleAiConfig());
+        this.saveAiConfigBtn.addEventListener('click', () => this.saveAiConfig());
+        this.aiGenerateReportBtn.addEventListener('click', () => this.aiGenerateReport());
+        
+        this.toggleRewriteBtn.addEventListener('click', () => this.toggleRewriteMode());
+        this.rewriteSelectedBtn.addEventListener('click', () => this.rewriteSelectedText());
+        this.expandNodeBtn.addEventListener('click', () => this.expandSelectedNode());
+        this.cancelRewriteBtn.addEventListener('click', () => this.cancelRewrite());
         
         this.canvas.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -131,6 +179,336 @@ class CausalCanvasApp {
         marker.appendChild(polygon);
         defs.appendChild(marker);
         this.edgesSvg.appendChild(defs);
+    }
+    
+    analyzeGraphStructure() {
+        if (this.nodes.length === 0) {
+            this.showToast('请先添加节点', 'error');
+            return;
+        }
+        
+        this.rootNodes = new Set();
+        this.resultNodes = new Set();
+        this.cycles = [];
+        
+        const nodeIds = new Set(this.nodes.map(n => n.id));
+        const inEdges = new Map();
+        const outEdges = new Map();
+        
+        nodeIds.forEach(id => {
+            inEdges.set(id, []);
+            outEdges.set(id, []);
+        });
+        
+        this.edges.forEach(edge => {
+            if (outEdges.has(edge.source)) {
+                outEdges.get(edge.source).push(edge.target);
+            }
+            if (inEdges.has(edge.target)) {
+                inEdges.get(edge.target).push(edge.source);
+            }
+        });
+        
+        this.nodes.forEach(node => {
+            if (inEdges.get(node.id).length === 0) {
+                this.rootNodes.add(node.id);
+            }
+            if (outEdges.get(node.id).length === 0) {
+                this.resultNodes.add(node.id);
+            }
+        });
+        
+        this.detectCycles(outEdges, nodeIds);
+        
+        this.updateNodeMarkers();
+        
+        let message = `分析完成：根因节点 ${this.rootNodes.size} 个，结果节点 ${this.resultNodes.size} 个`;
+        if (this.cycles.length > 0) {
+            message += `，检测到 ${this.cycles.length} 个循环因果！`;
+            this.showToast(message, 'warning');
+        } else {
+            this.showToast(message, 'success');
+        }
+        
+        this.showAnalysisResult();
+    }
+    
+    detectCycles(outEdges, nodeIds) {
+        const visited = new Set();
+        const recursionStack = new Set();
+        const path = [];
+        
+        const dfs = (nodeId) => {
+            if (recursionStack.has(nodeId)) {
+                const cycleStartIndex = path.indexOf(nodeId);
+                if (cycleStartIndex !== -1) {
+                    const cycle = path.slice(cycleStartIndex);
+                    cycle.push(nodeId);
+                    this.cycles.push([...cycle]);
+                }
+                return;
+            }
+            
+            if (visited.has(nodeId)) {
+                return;
+            }
+            
+            visited.add(nodeId);
+            recursionStack.add(nodeId);
+            path.push(nodeId);
+            
+            const neighbors = outEdges.get(nodeId) || [];
+            neighbors.forEach(neighbor => {
+                dfs(neighbor);
+            });
+            
+            recursionStack.delete(nodeId);
+            path.pop();
+        };
+        
+        nodeIds.forEach(nodeId => {
+            if (!visited.has(nodeId)) {
+                dfs(nodeId);
+            }
+        });
+    }
+    
+    updateNodeMarkers() {
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (!nodeEl) return;
+            
+            nodeEl.classList.remove('root-node', 'result-node', 'cycle-node');
+            
+            if (this.rootNodes.has(node.id)) {
+                nodeEl.classList.add('root-node');
+            }
+            if (this.resultNodes.has(node.id)) {
+                nodeEl.classList.add('result-node');
+            }
+            
+            const isInCycle = this.cycles.some(cycle => cycle.includes(node.id));
+            if (isInCycle) {
+                nodeEl.classList.add('cycle-node');
+            }
+        });
+    }
+    
+    showAnalysisResult() {
+        const rootLabels = Array.from(this.rootNodes).map(id => {
+            const node = this.nodes.find(n => n.id === id);
+            return node ? node.label : id;
+        });
+        
+        const resultLabels = Array.from(this.resultNodes).map(id => {
+            const node = this.nodes.find(n => n.id === id);
+            return node ? node.label : id;
+        });
+        
+        let info = '📊 图谱结构分析结果\n\n';
+        info += `🌱 根因节点（无入边）：${rootLabels.length} 个\n`;
+        if (rootLabels.length > 0) {
+            info += `   - ${rootLabels.join('、')}\n`;
+        }
+        
+        info += `\n🎯 结果节点（无出边）：${resultLabels.length} 个\n`;
+        if (resultLabels.length > 0) {
+            info += `   - ${resultLabels.join('、')}\n`;
+        }
+        
+        if (this.cycles.length > 0) {
+            info += `\n⚠️ 警告：检测到 ${this.cycles.length} 个循环因果！\n`;
+            this.cycles.forEach((cycle, index) => {
+                const cycleLabels = cycle.map(id => {
+                    const node = this.nodes.find(n => n.id === id);
+                    return node ? node.label : id;
+                });
+                info += `   循环 ${index + 1}：${cycleLabels.join(' → ')}\n`;
+            });
+        }
+        
+        this.reportContent.textContent = info;
+        this.reportSidebar.style.display = 'block';
+    }
+    
+    clearGraphAnalysis() {
+        this.rootNodes = new Set();
+        this.resultNodes = new Set();
+        this.cycles = [];
+        
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (nodeEl) {
+                nodeEl.classList.remove('root-node', 'result-node', 'cycle-node');
+            }
+        });
+        
+        this.showToast('已清除图谱分析标记', 'success');
+    }
+    
+    highlightDownstreamPath() {
+        const selectedNodes = this.nodes.filter(n => n.selected);
+        if (selectedNodes.length === 0) {
+            this.showToast('请先选择一个或多个节点', 'error');
+            return;
+        }
+        
+        this.clearHighlights();
+        
+        const outEdges = new Map();
+        const nodeIds = new Set(this.nodes.map(n => n.id));
+        
+        nodeIds.forEach(id => {
+            outEdges.set(id, []);
+        });
+        
+        this.edges.forEach(edge => {
+            if (outEdges.has(edge.source)) {
+                outEdges.get(edge.source).push({ target: edge.target, edgeId: edge.id });
+            }
+        });
+        
+        const visited = new Set();
+        const queue = [];
+        
+        selectedNodes.forEach(node => {
+            queue.push(node.id);
+            visited.add(node.id);
+            this.highlightedNodes.add(node.id);
+        });
+        
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const neighbors = outEdges.get(current) || [];
+            
+            neighbors.forEach(({ target, edgeId }) => {
+                if (!visited.has(target)) {
+                    visited.add(target);
+                    queue.push(target);
+                    this.highlightedNodes.add(target);
+                    this.highlightedEdges.add(edgeId);
+                } else if (this.highlightedNodes.has(target)) {
+                    this.highlightedEdges.add(edgeId);
+                }
+            });
+        }
+        
+        this.applyHighlights();
+        
+        const nodeCount = this.highlightedNodes.size;
+        const edgeCount = this.highlightedEdges.size;
+        this.showToast(`已高亮 ${nodeCount} 个节点和 ${edgeCount} 条连线`, 'success');
+    }
+    
+    highlightUpstreamPath() {
+        const selectedNodes = this.nodes.filter(n => n.selected);
+        if (selectedNodes.length === 0) {
+            this.showToast('请先选择一个或多个节点', 'error');
+            return;
+        }
+        
+        this.clearHighlights();
+        
+        const inEdges = new Map();
+        const nodeIds = new Set(this.nodes.map(n => n.id));
+        
+        nodeIds.forEach(id => {
+            inEdges.set(id, []);
+        });
+        
+        this.edges.forEach(edge => {
+            if (inEdges.has(edge.target)) {
+                inEdges.get(edge.target).push({ source: edge.source, edgeId: edge.id });
+            }
+        });
+        
+        const visited = new Set();
+        const queue = [];
+        
+        selectedNodes.forEach(node => {
+            queue.push(node.id);
+            visited.add(node.id);
+            this.highlightedNodes.add(node.id);
+        });
+        
+        while (queue.length > 0) {
+            const current = queue.shift();
+            const neighbors = inEdges.get(current) || [];
+            
+            neighbors.forEach(({ source, edgeId }) => {
+                if (!visited.has(source)) {
+                    visited.add(source);
+                    queue.push(source);
+                    this.highlightedNodes.add(source);
+                    this.highlightedEdges.add(edgeId);
+                } else if (this.highlightedNodes.has(source)) {
+                    this.highlightedEdges.add(edgeId);
+                }
+            });
+        }
+        
+        this.applyHighlights();
+        
+        const nodeCount = this.highlightedNodes.size;
+        const edgeCount = this.highlightedEdges.size;
+        this.showToast(`已高亮 ${nodeCount} 个节点和 ${edgeCount} 条连线`, 'success');
+    }
+    
+    applyHighlights() {
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (!nodeEl) return;
+            
+            if (this.highlightedNodes.has(node.id)) {
+                nodeEl.classList.add('highlighted');
+            } else {
+                nodeEl.classList.add('dimmed');
+            }
+        });
+        
+        this.edges.forEach(edge => {
+            const edgeEl = document.getElementById(edge.id);
+            if (!edgeEl) return;
+            
+            const line = edgeEl.querySelector('.edge-line');
+            const label = edgeEl.querySelector('.edge-label');
+            const labelBg = edgeEl.querySelector('.edge-label-bg');
+            
+            if (this.highlightedEdges.has(edge.id)) {
+                if (line) line.classList.add('highlighted');
+                if (label) label.classList.add('highlighted');
+                if (labelBg) labelBg.classList.add('highlighted');
+            } else {
+                if (line) line.classList.add('dimmed');
+                if (label) label.classList.add('dimmed');
+                if (labelBg) labelBg.classList.add('dimmed');
+            }
+        });
+    }
+    
+    clearHighlights() {
+        this.highlightedNodes.clear();
+        this.highlightedEdges.clear();
+        
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (nodeEl) {
+                nodeEl.classList.remove('highlighted', 'dimmed');
+            }
+        });
+        
+        this.edges.forEach(edge => {
+            const edgeEl = document.getElementById(edge.id);
+            if (!edgeEl) return;
+            
+            const line = edgeEl.querySelector('.edge-line');
+            const label = edgeEl.querySelector('.edge-label');
+            const labelBg = edgeEl.querySelector('.edge-label-bg');
+            
+            if (line) line.classList.remove('highlighted', 'dimmed');
+            if (label) label.classList.remove('highlighted', 'dimmed');
+            if (labelBg) labelBg.classList.remove('highlighted', 'dimmed');
+        });
     }
     
     async analyzeText() {
@@ -729,6 +1107,254 @@ class CausalCanvasApp {
             document.body.removeChild(textarea);
             this.showToast('报告已复制到剪贴板', 'success');
         }
+    }
+    
+    toggleAiConfig() {
+        const isVisible = this.aiConfigSection.style.display === 'block';
+        this.aiConfigSection.style.display = isVisible ? 'none' : 'block';
+        
+        if (!isVisible) {
+            this.deepseekApiKeyInput.value = this.deepseekApiKey;
+            this.deepseekModelSelect.value = this.deepseekModel;
+        }
+    }
+    
+    saveAiConfig() {
+        const apiKey = this.deepseekApiKeyInput.value.trim();
+        const model = this.deepseekModelSelect.value;
+        
+        if (!apiKey) {
+            this.showToast('请输入API Key', 'error');
+            return;
+        }
+        
+        this.deepseekApiKey = apiKey;
+        this.deepseekModel = model;
+        
+        localStorage.setItem('deepseekApiKey', apiKey);
+        localStorage.setItem('deepseekModel', model);
+        
+        this.aiConfigSection.style.display = 'none';
+        this.showToast('AI配置已保存', 'success');
+    }
+    
+    loadAiConfig() {
+        const savedApiKey = localStorage.getItem('deepseekApiKey');
+        const savedModel = localStorage.getItem('deepseekModel');
+        
+        if (savedApiKey) {
+            this.deepseekApiKey = savedApiKey;
+        }
+        if (savedModel) {
+            this.deepseekModel = savedModel;
+        }
+    }
+    
+    async aiGenerateReport() {
+        if (this.nodes.length === 0) {
+            this.showToast('请先添加节点', 'error');
+            return;
+        }
+        
+        if (!this.deepseekApiKey) {
+            this.showToast('请先配置DeepSeek API Key', 'error');
+            this.aiConfigSection.style.display = 'block';
+            return;
+        }
+        
+        const graphData = {
+            nodes: this.nodes.map(n => ({
+                id: n.id,
+                label: n.label,
+                type: n.type
+            })),
+            edges: this.edges.map(e => ({
+                source: e.source,
+                target: e.target,
+                relation: e.relation
+            })),
+            api_key: this.deepseekApiKey,
+            model: this.deepseekModel
+        };
+        
+        this.showToast('🤖 AI正在生成报告，请稍候...', 'info');
+        
+        try {
+            const response = await fetch('/api/ai-generate-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(graphData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '生成报告失败');
+            }
+            
+            const result = await response.json();
+            this.reportContent.textContent = result.report;
+            this.reportSidebar.style.display = 'block';
+            this.showToast('AI报告已生成', 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '生成报告失败', 'error');
+        }
+    }
+    
+    toggleRewriteMode() {
+        this.isRewriteMode = !this.isRewriteMode;
+        
+        if (this.isRewriteMode) {
+            this.rewriteSection.style.display = 'block';
+            this.reportContent.contentEditable = 'true';
+            this.reportContent.classList.add('editable');
+            this.updateNodeSelector();
+            this.showToast('已进入改写模式，可选择文本进行改写', 'info');
+        } else {
+            this.rewriteSection.style.display = 'none';
+            this.reportContent.contentEditable = 'false';
+            this.reportContent.classList.remove('editable');
+        }
+    }
+    
+    updateNodeSelector() {
+        if (!this.expandNodeSelect) return;
+        
+        this.expandNodeSelect.innerHTML = '<option value="">-- 选择节点 --</option>';
+        
+        this.nodes.forEach(node => {
+            const option = document.createElement('option');
+            option.value = node.id;
+            option.textContent = node.label;
+            this.expandNodeSelect.appendChild(option);
+        });
+    }
+    
+    getSelectedText() {
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+            return selection.toString().trim();
+        }
+        return '';
+    }
+    
+    async rewriteSelectedText() {
+        const selectedText = this.getSelectedText();
+        
+        if (!selectedText) {
+            this.showToast('请先在报告中选择要改写的文本', 'error');
+            return;
+        }
+        
+        if (!this.deepseekApiKey) {
+            this.showToast('请先配置DeepSeek API Key', 'error');
+            return;
+        }
+        
+        const style = this.rewriteStyleSelect.value;
+        
+        const requestData = {
+            text: selectedText,
+            style: style,
+            api_key: this.deepseekApiKey,
+            model: this.deepseekModel
+        };
+        
+        this.showToast('🤖 AI正在改写文本，请稍候...', 'info');
+        
+        try {
+            const response = await fetch('/api/ai-rewrite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '改写失败');
+            }
+            
+            const result = await response.json();
+            const rewrittenText = result.rewritten_text;
+            
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                range.deleteContents();
+                range.insertNode(document.createTextNode(rewrittenText));
+            }
+            
+            this.showToast('文本已改写', 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '改写失败', 'error');
+        }
+    }
+    
+    async expandSelectedNode() {
+        const selectedNodeId = this.expandNodeSelect.value;
+        
+        if (!selectedNodeId) {
+            this.showToast('请先选择要扩写的节点', 'error');
+            return;
+        }
+        
+        if (!this.deepseekApiKey) {
+            this.showToast('请先配置DeepSeek API Key', 'error');
+            return;
+        }
+        
+        const node = this.nodes.find(n => n.id === selectedNodeId);
+        if (!node) {
+            this.showToast('节点不存在', 'error');
+            return;
+        }
+        
+        const currentReport = this.reportContent.textContent;
+        
+        const requestData = {
+            node_label: node.label,
+            context: currentReport,
+            api_key: this.deepseekApiKey,
+            model: this.deepseekModel
+        };
+        
+        this.showToast('🤖 AI正在扩写节点，请稍候...', 'info');
+        
+        try {
+            const response = await fetch('/api/ai-expand', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '扩写失败');
+            }
+            
+            const result = await response.json();
+            const expandedText = result.expanded_text;
+            
+            const newContent = currentReport + '\n\n---\n\n【' + node.label + '详细说明】\n' + expandedText;
+            this.reportContent.textContent = newContent;
+            
+            this.showToast('节点已扩写', 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '扩写失败', 'error');
+        }
+    }
+    
+    cancelRewrite() {
+        this.isRewriteMode = false;
+        this.rewriteSection.style.display = 'none';
+        this.reportContent.contentEditable = 'false';
+        this.reportContent.classList.remove('editable');
+        this.showToast('已退出改写模式', 'info');
     }
     
     showToast(message, type = 'info') {
