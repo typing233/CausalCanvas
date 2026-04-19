@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CausalCanvas - 交互式知识重构工具</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <h1>CausalCanvas</h1>
+            <p class="subtitle">将碎片化文本转化为可视化逻辑网络</p>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar left-sidebar">
+                <div class="sidebar-section">
+                    <h3>📝 文本输入</h3>
+                    <textarea 
+                        id="textInput" 
+                        placeholder="在此粘贴您的文本内容...&#10;&#10;例如：&#10;第一次世界大战是一场全球性的军事冲突，始于1914年，持续至1918年。这场战争的导火索是1914年6月28日奥匈帝国皇储弗朗茨·斐迪南大公在萨拉热窝遇刺事件。刺杀者是塞尔维亚民族主义者加夫里洛·普林西普。&#10;&#10;奥匈帝国向塞尔维亚宣战，随后德国、俄国、法国和英国相继卷入战争。战争分为同盟国（德国、奥匈帝国、奥斯曼帝国）和协约国（英国、法国、俄国、意大利、美国）两大阵营。&#10;&#10;1917年美国加入协约国，同年俄国发生十月革命并退出战争。1918年11月，德国投降，第一次世界大战以协约国的胜利告终。这场战争导致约1600万人死亡，造成了巨大的人员和财产损失。"
+                        rows="10"
+                    ></textarea>
+                    <button id="analyzeBtn" class="btn btn-primary">
+                        🔍 解析文本
+                    </button>
+                </div>
+
+                <div class="sidebar-section" id="extractedSection" style="display: none;">
+                    <h3>🏷️ 提取的标签</h3>
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" data-type="all">全部</button>
+                        <button class="filter-tab" data-type="person">人物</button>
+                        <button class="filter-tab" data-type="event">事件</button>
+                        <button class="filter-tab" data-type="noun">概念</button>
+                    </div>
+                    <div id="tagsContainer" class="tags-container">
+                    </div>
+                </div>
+            </aside>
+
+            <main class="canvas-container">
+                <div class="canvas-toolbar">
+                    <div class="toolbar-left">
+                        <span id="nodeCount">节点: 0</span>
+                        <span id="edgeCount">连线: 0</span>
+                    </div>
+                    <div class="toolbar-right">
+                        <button id="clearCanvasBtn" class="btn btn-sm btn-danger">清空画布</button>
+                        <button id="generateReportBtn" class="btn btn-sm btn-success">📄 生成报告</button>
+                    </div>
+                </div>
+                
+                <div id="canvas" class="canvas">
+                    <svg id="edgesSvg" class="edges-svg"></svg>
+                    <div id="nodesContainer" class="nodes-container"></div>
+                </div>
+
+                <div id="relationSelector" class="relation-selector" style="display: none;">
+                    <h4>选择关系类型</h4>
+                    <div class="relation-list">
+                        <button class="relation-btn" data-relation="导致">导致</button>
+                        <button class="relation-btn" data-relation="造成">造成</button>
+                        <button class="relation-btn" data-relation="导火索">导火索</button>
+                        <button class="relation-btn" data-relation="影响">影响</button>
+                        <button class="relation-btn" data-relation="促使">促使</button>
+                        <button class="relation-btn" data-relation="引发">引发</button>
+                        <button class="relation-btn" data-relation="推动">推动</button>
+                        <button class="relation-btn" data-relation="阻碍">阻碍</button>
+                        <button class="relation-btn" data-relation="起源于">起源于</button>
+                        <button class="relation-btn" data-relation="结果是">结果是</button>
+                    </div>
+                    <button id="cancelRelation" class="btn btn-sm btn-danger">取消</button>
+                </div>
+            </main>
+
+            <aside class="sidebar right-sidebar" id="reportSidebar" style="display: none;">
+                <div class="sidebar-section">
+                    <h3>📄 生成的报告</h3>
+                    <div id="reportContent" class="report-content"></div>
+                    <div class="report-actions">
+                        <button id="copyReportBtn" class="btn btn-primary">
+                            📋 一键复制
+                        </button>
+                        <button id="closeReportBtn" class="btn btn-secondary">
+                            关闭
+                        </button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <div id="toast" class="toast"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@node-rs/jieba@1.9.2/jieba_binding_wasm.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
