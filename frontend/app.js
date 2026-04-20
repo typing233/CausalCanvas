@@ -31,6 +31,7 @@ class CausalCanvasApp {
         this.pathResults = null;
         this.criticalPathNodes = [];
         this.criticalPathEdges = [];
+        this.selectedEdges = new Set();
         
         this.init();
     }
@@ -856,6 +857,71 @@ class CausalCanvasApp {
         });
     }
     
+    selectEdge(edgeId) {
+        const edge = this.edges.find(e => e.id === edgeId);
+        if (edge) {
+            this.selectedEdges.add(edgeId);
+            const edgeEl = document.getElementById(edgeId);
+            if (edgeEl) {
+                edgeEl.classList.add('edge-selected');
+                const line = edgeEl.querySelector('.edge-line');
+                const labelBg = edgeEl.querySelector('.edge-label-bg');
+                const label = edgeEl.querySelector('.edge-label');
+                if (line) line.classList.add('edge-selected-line');
+                if (labelBg) labelBg.classList.add('edge-selected-label-bg');
+                if (label) label.classList.add('edge-selected-label');
+            }
+        }
+    }
+    
+    deselectEdge(edgeId) {
+        this.selectedEdges.delete(edgeId);
+        const edgeEl = document.getElementById(edgeId);
+        if (edgeEl) {
+            edgeEl.classList.remove('edge-selected');
+            const line = edgeEl.querySelector('.edge-line');
+            const labelBg = edgeEl.querySelector('.edge-label-bg');
+            const label = edgeEl.querySelector('.edge-label');
+            if (line) line.classList.remove('edge-selected-line');
+            if (labelBg) labelBg.classList.remove('edge-selected-label-bg');
+            if (label) label.classList.remove('edge-selected-label');
+        }
+    }
+    
+    deselectAllEdges() {
+        const edgeIds = [...this.selectedEdges];
+        edgeIds.forEach(edgeId => {
+            this.deselectEdge(edgeId);
+        });
+    }
+    
+    deleteEdge(edgeId) {
+        const edgeIndex = this.edges.findIndex(e => e.id === edgeId);
+        if (edgeIndex === -1) return;
+        
+        const edgeEl = document.getElementById(edgeId);
+        if (edgeEl) edgeEl.remove();
+        
+        this.edges.splice(edgeIndex, 1);
+        this.selectedEdges.delete(edgeId);
+        
+        this.updateCounts();
+        this.showToast('连接线已删除', 'success');
+    }
+    
+    deleteSelected() {
+        const selectedNodes = this.nodes.filter(n => n.selected);
+        const selectedEdgeIds = [...this.selectedEdges];
+        
+        selectedNodes.forEach(node => {
+            this.deleteNode(node.id);
+        });
+        
+        selectedEdgeIds.forEach(edgeId => {
+            this.deleteEdge(edgeId);
+        });
+    }
+    
     moveNode(e) {
         const rect = this.canvas.getBoundingClientRect();
         const x = e.clientX - rect.left - this.nodeOffset.x;
@@ -1047,6 +1113,7 @@ class CausalCanvasApp {
         g.id = edge.id;
         g.setAttribute('data-source', edge.source);
         g.setAttribute('data-target', edge.target);
+        g.setAttribute('data-edge-id', edge.id);
         
         const path = this.createBezierPath(
             startPoint.x, startPoint.y,
@@ -1057,6 +1124,7 @@ class CausalCanvasApp {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         line.setAttribute('d', path);
         line.setAttribute('class', 'edge-line');
+        line.style.cursor = 'pointer';
         
         const midX = (startPoint.x + endPoint.x) / 2;
         const midY = (startPoint.y + endPoint.y) / 2;
@@ -1074,8 +1142,21 @@ class CausalCanvasApp {
         label.setAttribute('x', midX);
         label.setAttribute('y', midY + 5);
         label.textContent = edge.relation;
+        label.style.cursor = 'pointer';
         
-        label.addEventListener('click', () => {
+        const handleEdgeClick = (e) => {
+            e.stopPropagation();
+            if (!e.shiftKey) {
+                this.deselectAllNodes();
+                this.deselectAllEdges();
+            }
+            this.selectEdge(edge.id);
+        };
+        
+        line.addEventListener('click', handleEdgeClick);
+        labelBg.addEventListener('click', handleEdgeClick);
+        label.addEventListener('click', (e) => {
+            e.stopPropagation();
             this.showRelationSelector();
             this.pendingEdge = {
                 source: edge.source,
@@ -2335,22 +2416,16 @@ class CausalCanvasApp {
             }
             
             const canvasRect = this.canvas.getBoundingClientRect();
-            const nodeCount = result.nodes.length;
-            const centerX = canvasRect.width / 2;
-            const centerY = canvasRect.height / 2;
-            const radius = Math.min(canvasRect.width, canvasRect.height) * 0.35;
+            const nodePositions = this.calculateOptimalLayout(result.nodes, result.edges, canvasRect);
             
-            result.nodes.forEach((node, index) => {
-                const angle = (2 * Math.PI * index) / nodeCount - Math.PI / 2;
-                const x = centerX + radius * Math.cos(angle) - 60;
-                const y = centerY + radius * Math.sin(angle) - 20;
-                
+            result.nodes.forEach(node => {
+                const pos = nodePositions[node.id] || { x: 100, y: 100 };
                 const nodeData = {
                     id: node.id,
                     label: node.label,
                     type: node.type,
-                    x: Math.max(20, x),
-                    y: Math.max(20, y),
+                    x: pos.x,
+                    y: pos.y,
                     selected: false
                 };
                 
@@ -2398,6 +2473,321 @@ class CausalCanvasApp {
             console.error('Error:', error);
             this.showToast(error.message || '生成失败', 'error');
         }
+    }
+    
+    calculateOptimalLayout(nodes, edges, canvasRect) {
+        const positions = {};
+        const nodeMap = {};
+        
+        nodes.forEach(node => {
+            nodeMap[node.id] = node;
+            positions[node.id] = { x: 0, y: 0 };
+        });
+        
+        const inDegree = {};
+        const outDegree = {};
+        const adjacencyList = {};
+        
+        nodes.forEach(node => {
+            inDegree[node.id] = 0;
+            outDegree[node.id] = 0;
+            adjacencyList[node.id] = [];
+        });
+        
+        edges.forEach(edge => {
+            if (adjacencyList[edge.source]) {
+                adjacencyList[edge.source].push(edge.target);
+            }
+            if (inDegree[edge.target] !== undefined) {
+                inDegree[edge.target]++;
+            }
+            if (outDegree[edge.source] !== undefined) {
+                outDegree[edge.source]++;
+            }
+        });
+        
+        const hasCycle = this.detectCycle(adjacencyList, nodes.map(n => n.id));
+        
+        if (!hasCycle && nodes.length <= 20) {
+            return this.hierarchicalLayout(nodes, edges, inDegree, outDegree, adjacencyList, canvasRect);
+        } else if (nodes.length <= 15) {
+            return this.improvedCircularLayout(nodes, edges, inDegree, outDegree, canvasRect);
+        } else {
+            return this.forceDirectedLayout(nodes, edges, canvasRect);
+        }
+    }
+    
+    detectCycle(adjacencyList, nodeIds) {
+        const visited = new Set();
+        const recStack = new Set();
+        
+        const dfs = (nodeId) => {
+            if (recStack.has(nodeId)) return true;
+            if (visited.has(nodeId)) return false;
+            
+            visited.add(nodeId);
+            recStack.add(nodeId);
+            
+            const neighbors = adjacencyList[nodeId] || [];
+            for (const neighbor of neighbors) {
+                if (dfs(neighbor)) return true;
+            }
+            
+            recStack.delete(nodeId);
+            return false;
+        };
+        
+        for (const nodeId of nodeIds) {
+            if (dfs(nodeId)) return true;
+        }
+        return false;
+    }
+    
+    hierarchicalLayout(nodes, edges, inDegree, outDegree, adjacencyList, canvasRect) {
+        const positions = {};
+        const levels = [];
+        const nodeLevel = {};
+        const tempInDegree = { ...inDegree };
+        const nodeIds = nodes.map(n => n.id);
+        
+        let level = 0;
+        let remainingNodes = new Set(nodeIds);
+        
+        while (remainingNodes.size > 0) {
+            const currentLevel = [];
+            
+            nodeIds.forEach(nodeId => {
+                if (remainingNodes.has(nodeId) && tempInDegree[nodeId] === 0) {
+                    currentLevel.push(nodeId);
+                }
+            });
+            
+            if (currentLevel.length === 0) {
+                currentLevel.push(...remainingNodes);
+            }
+            
+            levels.push(currentLevel);
+            currentLevel.forEach(nodeId => {
+                nodeLevel[nodeId] = level;
+                remainingNodes.delete(nodeId);
+                
+                const neighbors = adjacencyList[nodeId] || [];
+                neighbors.forEach(neighbor => {
+                    if (tempInDegree[neighbor] !== undefined) {
+                        tempInDegree[neighbor]--;
+                    }
+                });
+            });
+            
+            level++;
+        }
+        
+        const padding = 60;
+        const usableWidth = canvasRect.width - padding * 2;
+        const usableHeight = canvasRect.height - padding * 2;
+        
+        const levelCount = levels.length;
+        const levelHeight = levelCount > 1 ? usableHeight / (levelCount - 1) : usableHeight / 2;
+        
+        levels.forEach((levelNodes, levelIndex) => {
+            const nodeCount = levelNodes.length;
+            const levelWidth = nodeCount > 1 ? usableWidth / (nodeCount - 1) : usableWidth / 2;
+            
+            levelNodes.forEach((nodeId, nodeIndex) => {
+                let x, y;
+                
+                if (levelCount === 1) {
+                    y = canvasRect.height / 2 - 20;
+                } else {
+                    y = padding + levelHeight * levelIndex - 20;
+                }
+                
+                if (nodeCount === 1) {
+                    x = canvasRect.width / 2 - 60;
+                } else {
+                    x = padding + levelWidth * nodeIndex - 60;
+                }
+                
+                x = Math.max(padding, Math.min(x, canvasRect.width - padding - 120));
+                y = Math.max(padding, Math.min(y, canvasRect.height - padding - 40));
+                
+                positions[nodeId] = { x, y };
+            });
+        });
+        
+        return positions;
+    }
+    
+    improvedCircularLayout(nodes, edges, inDegree, outDegree, canvasRect) {
+        const positions = {};
+        const nodeCount = nodes.length;
+        
+        const nodeImportance = {};
+        nodes.forEach(node => {
+            const totalDegree = inDegree[node.id] + outDegree[node.id];
+            nodeImportance[node.id] = {
+                totalDegree,
+                inDegree: inDegree[node.id],
+                outDegree: outDegree[node.id],
+                isRoot: inDegree[node.id] === 0,
+                isLeaf: outDegree[node.id] === 0
+            };
+        });
+        
+        const sortedNodes = [...nodes].sort((a, b) => {
+            const aImp = nodeImportance[a.id];
+            const bImp = nodeImportance[b.id];
+            
+            if (aImp.isRoot && !bImp.isRoot) return -1;
+            if (!aImp.isRoot && bImp.isRoot) return 1;
+            
+            if (aImp.isLeaf && !bImp.isLeaf) return 1;
+            if (!aImp.isLeaf && bImp.isLeaf) return -1;
+            
+            return bImp.totalDegree - aImp.totalDegree;
+        });
+        
+        const centerX = canvasRect.width / 2;
+        const centerY = canvasRect.height / 2;
+        const maxRadius = Math.min(canvasRect.width, canvasRect.height) * 0.4;
+        
+        sortedNodes.forEach((node, index) => {
+            const imp = nodeImportance[node.id];
+            
+            let radius = maxRadius;
+            if (imp.isRoot || imp.isLeaf) {
+                radius = maxRadius * 0.9;
+            } else if (imp.totalDegree > 2) {
+                radius = maxRadius * 0.6;
+            } else {
+                radius = maxRadius * 0.75;
+            }
+            
+            const angle = (2 * Math.PI * index) / nodeCount - Math.PI / 2;
+            const x = centerX + radius * Math.cos(angle) - 60;
+            const y = centerY + radius * Math.sin(angle) - 20;
+            
+            positions[node.id] = { x, y };
+        });
+        
+        return positions;
+    }
+    
+    forceDirectedLayout(nodes, edges, canvasRect) {
+        const positions = {};
+        const velocities = {};
+        
+        const centerX = canvasRect.width / 2;
+        const centerY = canvasRect.height / 2;
+        const radius = Math.min(canvasRect.width, canvasRect.height) * 0.35;
+        
+        nodes.forEach((node, index) => {
+            const angle = (2 * Math.PI * index) / nodes.length - Math.PI / 2;
+            positions[node.id] = {
+                x: centerX + radius * Math.cos(angle) - 60,
+                y: centerY + radius * Math.sin(angle) - 20
+            };
+            velocities[node.id] = { x: 0, y: 0 };
+        });
+        
+        const edgeMap = {};
+        edges.forEach(edge => {
+            const key = `${edge.source}-${edge.target}`;
+            edgeMap[key] = true;
+        });
+        
+        const iterations = 50;
+        const repulsionStrength = 5000;
+        const attractionStrength = 0.01;
+        const idealEdgeLength = 150;
+        const damping = 0.85;
+        
+        for (let iter = 0; iter < iterations; iter++) {
+            const forces = {};
+            nodes.forEach(node => {
+                forces[node.id] = { x: 0, y: 0 };
+            });
+            
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const nodeA = nodes[i];
+                    const nodeB = nodes[j];
+                    
+                    const dx = positions[nodeB.id].x - positions[nodeA.id].x;
+                    const dy = positions[nodeB.id].y - positions[nodeA.id].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy) + 1;
+                    
+                    const repulsionForce = repulsionStrength / (distance * distance);
+                    const fx = (dx / distance) * repulsionForce;
+                    const fy = (dy / distance) * repulsionForce;
+                    
+                    forces[nodeA.id].x -= fx;
+                    forces[nodeA.id].y -= fy;
+                    forces[nodeB.id].x += fx;
+                    forces[nodeB.id].y += fy;
+                }
+            }
+            
+            edges.forEach(edge => {
+                const sourcePos = positions[edge.source];
+                const targetPos = positions[edge.target];
+                
+                if (!sourcePos || !targetPos) return;
+                
+                const dx = targetPos.x - sourcePos.x;
+                const dy = targetPos.y - sourcePos.y;
+                const distance = Math.sqrt(dx * dx + dy * dy) + 1;
+                
+                const diff = distance - idealEdgeLength;
+                const attractionForce = diff * attractionStrength;
+                const fx = (dx / distance) * attractionForce;
+                const fy = (dy / distance) * attractionForce;
+                
+                forces[edge.source].x += fx;
+                forces[edge.source].y += fy;
+                forces[edge.target].x -= fx;
+                forces[edge.target].y -= fy;
+            });
+            
+            nodes.forEach(node => {
+                velocities[node.id].x = (velocities[node.id].x + forces[node.id].x) * damping;
+                velocities[node.id].y = (velocities[node.id].y + forces[node.id].y) * damping;
+                
+                positions[node.id].x += velocities[node.id].x;
+                positions[node.id].y += velocities[node.id].y;
+            });
+        }
+        
+        const padding = 50;
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        
+        nodes.forEach(node => {
+            minX = Math.min(minX, positions[node.id].x);
+            maxX = Math.max(maxX, positions[node.id].x);
+            minY = Math.min(minY, positions[node.id].y);
+            maxY = Math.max(maxY, positions[node.id].y);
+        });
+        
+        const graphWidth = maxX - minX + 120;
+        const graphHeight = maxY - minY + 40;
+        
+        const scaleX = Math.min(1, (canvasRect.width - padding * 2) / graphWidth);
+        const scaleY = Math.min(1, (canvasRect.height - padding * 2) / graphHeight);
+        const scale = Math.min(scaleX, scaleY);
+        
+        const offsetX = (canvasRect.width - graphWidth * scale) / 2 - minX * scale;
+        const offsetY = (canvasRect.height - graphHeight * scale) / 2 - minY * scale;
+        
+        nodes.forEach(node => {
+            positions[node.id].x = positions[node.id].x * scale + offsetX;
+            positions[node.id].y = positions[node.id].y * scale + offsetY;
+            
+            positions[node.id].x = Math.max(padding, Math.min(positions[node.id].x, canvasRect.width - padding - 120));
+            positions[node.id].y = Math.max(padding, Math.min(positions[node.id].y, canvasRect.height - padding - 40));
+        });
+        
+        return positions;
     }
 }
 
