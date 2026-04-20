@@ -67,6 +67,24 @@ class AIExpandRequest(BaseModel):
     model: str = "deepseek-chat"
 
 
+class PathQueryRequest(BaseModel):
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+    start_node_id: Optional[str] = None
+    end_node_id: Optional[str] = None
+
+
+class InfluenceAnalysisRequest(BaseModel):
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
+
+
+class NaturalLanguageGraphRequest(BaseModel):
+    text: str
+    api_key: Optional[str] = None
+    model: str = "deepseek-chat"
+
+
 class ExtractedEntity(BaseModel):
     text: str
     type: str
@@ -459,6 +477,483 @@ async def ai_expand(data: AIExpandRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"扩写失败: {str(e)}")
+
+
+def calculate_node_metrics(nodes: List[Dict], edges: List[Dict]) -> Dict:
+    node_ids = {node["id"] for node in nodes}
+    node_dict = {node["id"]: node for node in nodes}
+    
+    in_degree = {node_id: 0 for node_id in node_ids}
+    out_degree = {node_id: 0 for node_id in node_ids}
+    
+    out_edges = {node_id: [] for node_id in node_ids}
+    in_edges_map = {node_id: [] for node_id in node_ids}
+    
+    for edge in edges:
+        source = edge["source"]
+        target = edge["target"]
+        if source in out_edges and target in in_edges_map:
+            out_degree[source] += 1
+            in_degree[target] += 1
+            out_edges[source].append({"target": target, "edge": edge})
+            in_edges_map[target].append({"source": source, "edge": edge})
+    
+    betweenness = {node_id: 0.0 for node_id in node_ids}
+    
+    for start_node in node_ids:
+        for end_node in node_ids:
+            if start_node == end_node:
+                continue
+            
+            all_paths = find_all_paths(out_edges, start_node, end_node)
+            if not all_paths:
+                continue
+            
+            path_count = len(all_paths)
+            
+            for middle_node in node_ids:
+                if middle_node == start_node or middle_node == end_node:
+                    continue
+                
+                paths_through_middle = sum(
+                    1 for path in all_paths if middle_node in path[1:-1]
+                )
+                betweenness[middle_node] += paths_through_middle / path_count
+    
+    n = len(node_ids)
+    if n > 2:
+        normalize_factor = (n - 1) * (n - 2)
+        for node_id in betweenness:
+            betweenness[node_id] /= normalize_factor if normalize_factor > 0 else 1
+    
+    node_metrics = []
+    for node_id in node_ids:
+        node = node_dict[node_id]
+        in_d = in_degree[node_id]
+        out_d = out_degree[node_id]
+        total_degree = in_d + out_d
+        
+        influence_score = (
+            betweenness[node_id] * 100 + 
+            total_degree * 10 + 
+            out_d * 5
+        )
+        
+        node_metrics.append({
+            "node_id": node_id,
+            "label": node.get("label", node_id),
+            "type": node.get("type", "unknown"),
+            "in_degree": in_d,
+            "out_degree": out_d,
+            "total_degree": total_degree,
+            "betweenness_centrality": round(betweenness[node_id], 4),
+            "influence_score": round(influence_score, 2)
+        })
+    
+    node_metrics.sort(key=lambda x: x["influence_score"], reverse=True)
+    
+    return {
+        "node_metrics": node_metrics,
+        "summary": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "avg_in_degree": round(sum(in_degree.values()) / len(in_degree), 2) if in_degree else 0,
+            "avg_out_degree": round(sum(out_degree.values()) / len(out_degree), 2) if out_degree else 0,
+            "max_betweenness": round(max(betweenness.values()), 4) if betweenness else 0
+        }
+    }
+
+
+def find_all_paths(out_edges: Dict, start: str, end: str, max_depth: int = 10) -> List[List[str]]:
+    paths = []
+    visited = set()
+    
+    def dfs(current: str, path: List[str]):
+        if len(path) > max_depth:
+            return
+        
+        if current == end:
+            paths.append(list(path))
+            return
+        
+        if current in visited:
+            return
+        
+        visited.add(current)
+        for neighbor_info in out_edges.get(current, []):
+            neighbor = neighbor_info["target"]
+            path.append(neighbor)
+            dfs(neighbor, path)
+            path.pop()
+        visited.remove(current)
+    
+    dfs(start, [start])
+    return paths
+
+
+def calculate_path_weight(path: List[str], edges: List[Dict], node_dict: Dict) -> float:
+    if len(path) < 2:
+        return 0.0
+    
+    total_weight = 0.0
+    
+    for i in range(len(path) - 1):
+        source = path[i]
+        target = path[i + 1]
+        
+        for edge in edges:
+            if edge["source"] == source and edge["target"] == target:
+                relation = edge.get("relation", "影响")
+                
+                weight_map = {
+                    "导致": 10,
+                    "造成": 9,
+                    "导火索": 8,
+                    "引发": 7,
+                    "推动": 6,
+                    "促使": 5,
+                    "影响": 4,
+                    "起源于": 3,
+                    "结果是": 2,
+                    "阻碍": 1
+                }
+                
+                edge_weight = weight_map.get(relation, 3)
+                total_weight += edge_weight
+                break
+    
+    return total_weight
+
+
+@app.post("/api/analyze-influence")
+async def analyze_influence(data: InfluenceAnalysisRequest):
+    if not data.nodes:
+        raise HTTPException(status_code=400, detail="请提供节点数据")
+    
+    try:
+        result = calculate_node_metrics(data.nodes, data.edges)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"影响分析失败: {str(e)}")
+
+
+@app.post("/api/query-path")
+async def query_path(data: PathQueryRequest):
+    if not data.nodes:
+        raise HTTPException(status_code=400, detail="请提供节点数据")
+    
+    if not data.start_node_id or not data.end_node_id:
+        raise HTTPException(status_code=400, detail="请指定起点和终点节点")
+    
+    node_ids = {node["id"] for node in data.nodes}
+    
+    if data.start_node_id not in node_ids:
+        raise HTTPException(status_code=400, detail=f"起点节点 {data.start_node_id} 不存在")
+    
+    if data.end_node_id not in node_ids:
+        raise HTTPException(status_code=400, detail=f"终点节点 {data.end_node_id} 不存在")
+    
+    if data.start_node_id == data.end_node_id:
+        return {
+            "paths": [],
+            "critical_path": None,
+            "start_node_id": data.start_node_id,
+            "end_node_id": data.end_node_id,
+            "message": "起点和终点不能是同一个节点"
+        }
+    
+    out_edges = {node_id: [] for node_id in node_ids}
+    node_dict = {node["id"]: node for node in data.nodes}
+    
+    for edge in data.edges:
+        source = edge["source"]
+        target = edge["target"]
+        if source in out_edges:
+            out_edges[source].append({"target": target, "edge": edge})
+    
+    all_paths = find_all_paths(out_edges, data.start_node_id, data.end_node_id)
+    
+    if not all_paths:
+        return {
+            "paths": [],
+            "critical_path": None,
+            "start_node_id": data.start_node_id,
+            "end_node_id": data.end_node_id,
+            "message": f"从 {node_dict[data.start_node_id].get('label', data.start_node_id)} 到 {node_dict[data.end_node_id].get('label', data.end_node_id)} 没有可用路径"
+        }
+    
+    paths_with_info = []
+    max_weight = -1
+    critical_path_info = None
+    
+    for path in all_paths:
+        path_nodes = []
+        path_edges = []
+        
+        for i in range(len(path) - 1):
+            source = path[i]
+            target = path[i + 1]
+            path_nodes.append({
+                "node_id": source,
+                "label": node_dict[source].get("label", source)
+            })
+            
+            for edge in data.edges:
+                if edge["source"] == source and edge["target"] == target:
+                    path_edges.append({
+                        "edge_id": edge["id"],
+                        "source": source,
+                        "target": target,
+                        "relation": edge.get("relation", "影响")
+                    })
+                    break
+        
+        path_nodes.append({
+            "node_id": path[-1],
+            "label": node_dict[path[-1]].get("label", path[-1])
+        })
+        
+        path_weight = calculate_path_weight(path, data.edges, node_dict)
+        
+        path_info = {
+            "node_ids": path,
+            "nodes": path_nodes,
+            "edges": path_edges,
+            "length": len(path) - 1,
+            "weight": round(path_weight, 2)
+        }
+        
+        paths_with_info.append(path_info)
+        
+        if path_weight > max_weight:
+            max_weight = path_weight
+            critical_path_info = path_info
+    
+    paths_with_info.sort(key=lambda x: x["weight"], reverse=True)
+    
+    return {
+        "paths": paths_with_info,
+        "critical_path": critical_path_info,
+        "start_node_id": data.start_node_id,
+        "end_node_id": data.end_node_id,
+        "start_label": node_dict[data.start_node_id].get("label", data.start_node_id),
+        "end_label": node_dict[data.end_node_id].get("label", data.end_node_id),
+        "total_paths": len(paths_with_info),
+        "message": f"找到 {len(paths_with_info)} 条路径"
+    }
+
+
+@app.post("/api/natural-language-graph")
+async def natural_language_to_graph(data: NaturalLanguageGraphRequest):
+    if not data.text.strip():
+        raise HTTPException(status_code=400, detail="请输入因果描述文本")
+    
+    if data.api_key:
+        system_prompt = """你是一位专业的因果关系图谱构建专家。请分析用户提供的文本，识别其中的关键实体和它们之间的因果关系，输出结构化的JSON格式。
+
+输出要求：
+1. 从文本中提取所有关键实体（节点）
+2. 识别实体之间的因果关系（边）
+3. 输出严格的JSON格式，不要包含其他文字
+
+节点类型说明：
+- person: 人物
+- event: 事件
+- noun: 概念/事物
+
+关系类型（优先选择）：
+- 导致
+- 造成
+- 导火索
+- 影响
+- 促使
+- 引发
+- 推动
+- 阻碍
+- 起源于
+- 结果是
+
+输出格式示例：
+{
+    "nodes": [
+        {"id": "n1", "label": "萨拉热窝事件", "type": "event"},
+        {"id": "n2", "label": "第一次世界大战", "type": "event"},
+        {"id": "n3", "label": "斐迪南大公", "type": "person"}
+    ],
+    "edges": [
+        {"source": "n1", "target": "n2", "relation": "导火索"},
+        {"source": "n3", "target": "n1", "relation": "引发"}
+    ]
+}
+
+请确保：
+1. 所有边的关系类型都从上面的10种类型中选择
+2. 节点id使用n1, n2, n3...格式
+3. 只输出JSON，不要有其他解释文字"""
+
+        user_prompt = f"请分析以下文本，构建因果关系图谱：\n\n{data.text}\n\n请只输出JSON格式的结果。"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        try:
+            ai_response = await call_deepseek_api(
+                api_key=data.api_key,
+                model=data.model,
+                messages=messages
+            )
+            
+            json_match = re.search(r'\{[\s\S]*\}', ai_response)
+            if json_match:
+                try:
+                    result = eval(json_match.group(0))
+                    if "nodes" in result and "edges" in result:
+                        return {
+                            "nodes": result["nodes"],
+                            "edges": result["edges"],
+                            "method": "ai"
+                        }
+                except:
+                    pass
+        except Exception as e:
+            pass
+    
+    return await extract_graph_from_text_simple(data.text)
+
+
+async def extract_graph_from_text_simple(text: str) -> Dict:
+    entities_dict: Dict[str, Dict] = {}
+    
+    for pattern in PERSON_PATTERNS:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            if len(match) >= 2 and len(match) <= 4:
+                if match not in entities_dict:
+                    entities_dict[match] = {
+                        "text": match,
+                        "type": "person"
+                    }
+    
+    for pattern in EVENT_PATTERNS:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            if len(match) >= 4:
+                if match not in entities_dict:
+                    entities_dict[match] = {
+                        "text": match,
+                        "type": "event"
+                    }
+    
+    words = jieba.lcut(text)
+    stop_words = set([
+        "的", "了", "是", "在", "我", "有", "和", "就",
+        "不", "人", "都", "一", "一个", "上", "也", "很",
+        "到", "说", "要", "去", "你", "会", "着", "没有",
+        "看", "好", "自己", "这", "那", "他", "她", "它",
+        "们", "这个", "那个", "什么", "怎么", "为什么",
+        "哪", "哪里", "谁", "多少", "几", "啊", "吧", "呢",
+        "吗", "呀", "哦", "嗯", "哈", "啦", "喽", "呗"
+    ])
+    
+    for word, flag in pseg.cut(text):
+        if flag.startswith('n') and len(word) >= 2 and word not in stop_words:
+            if word not in entities_dict:
+                entities_dict[word] = {
+                    "text": word,
+                    "type": "noun"
+                }
+    
+    entities = list(entities_dict.values())
+    
+    if len(entities) < 2:
+        return {
+            "nodes": [],
+            "edges": [],
+            "method": "simple",
+            "message": "未能提取足够的实体"
+        }
+    
+    nodes = []
+    node_id_map = {}
+    for i, entity in enumerate(entities):
+        node_id = f"n{i+1}"
+        node_id_map[entity["text"]] = node_id
+        nodes.append({
+            "id": node_id,
+            "label": entity["text"],
+            "type": entity["type"]
+        })
+    
+    causal_keywords = {
+        "导致": "导致",
+        "造成": "造成",
+        "引发": "引发",
+        "促使": "促使",
+        "推动": "推动",
+        "影响": "影响",
+        "起源于": "起源于",
+        "结果是": "结果是"
+    }
+    
+    edges = []
+    edge_id = 1
+    
+    sentences = re.split(r'[。！？；\n]+', text)
+    
+    for sentence in sentences:
+        if not sentence.strip():
+            continue
+        
+        for keyword, relation in causal_keywords.items():
+            if keyword in sentence:
+                parts = sentence.split(keyword)
+                if len(parts) >= 2:
+                    before_part = parts[0]
+                    after_part = keyword.join(parts[1:])
+                    
+                    source_candidates = []
+                    target_candidates = []
+                    
+                    for entity_text, node_id in node_id_map.items():
+                        if entity_text in before_part:
+                            source_candidates.append(node_id)
+                        if entity_text in after_part:
+                            target_candidates.append(node_id)
+                    
+                    for source in source_candidates:
+                        for target in target_candidates:
+                            if source != target:
+                                exists = any(e["source"] == source and e["target"] == target for e in edges)
+                                if not exists:
+                                    edges.append({
+                                        "id": f"e{edge_id}",
+                                        "source": source,
+                                        "target": target,
+                                        "relation": relation
+                                    })
+                                    edge_id += 1
+    
+    if not edges and len(nodes) >= 2:
+        for i in range(len(nodes) - 1):
+            if nodes[i]["type"] == "event" or nodes[i+1]["type"] == "event":
+                edges.append({
+                    "id": f"e{edge_id}",
+                    "source": nodes[i]["id"],
+                    "target": nodes[i+1]["id"],
+                    "relation": "影响"
+                })
+                edge_id += 1
+                if len(edges) >= 3:
+                    break
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "method": "simple",
+        "message": f"提取了 {len(nodes)} 个节点和 {len(edges)} 条边"
+    }
 
 
 if __name__ == "__main__":

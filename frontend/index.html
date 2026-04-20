@@ -16,11 +16,20 @@
         <div class="main-content">
             <aside class="sidebar left-sidebar">
                 <div class="sidebar-section">
-                    <h3>📝 文本输入</h3>
+                    <div class="section-tabs">
+                        <button class="section-tab active" data-section="text-input">📝 文本解析</button>
+                        <button class="section-tab" data-section="natural-graph">🌐 一键建图</button>
+                        <button class="section-tab" data-section="influence-analysis">📊 影响分析</button>
+                        <button class="section-tab" data-section="path-query">🔍 路径查询</button>
+                    </div>
+                </div>
+
+                <div class="sidebar-section" id="textInputSection">
+                    <h4>文本输入与标签提取</h4>
                     <textarea 
                         id="textInput" 
-                        placeholder="在此粘贴您的文本内容...&#10;&#10;例如：&#10;第一次世界大战是一场全球性的军事冲突，始于1914年，持续至1918年。这场战争的导火索是1914年6月28日奥匈帝国皇储弗朗茨·斐迪南大公在萨拉热窝遇刺事件。刺杀者是塞尔维亚民族主义者加夫里洛·普林西普。&#10;&#10;奥匈帝国向塞尔维亚宣战，随后德国、俄国、法国和英国相继卷入战争。战争分为同盟国（德国、奥匈帝国、奥斯曼帝国）和协约国（英国、法国、俄国、意大利、美国）两大阵营。&#10;&#10;1917年美国加入协约国，同年俄国发生十月革命并退出战争。1918年11月，德国投降，第一次世界大战以协约国的胜利告终。这场战争导致约1600万人死亡，造成了巨大的人员和财产损失。"
-                        rows="10"
+                        placeholder="在此粘贴您的文本内容...&#10;&#10;例如：&#10;第一次世界大战是一场全球性的军事冲突，始于1914年，持续至1918年。这场战争的导火索是1914年6月28日奥匈帝国皇储弗朗茨·斐迪南大公在萨拉热窝遇刺事件。"
+                        rows="8"
                     ></textarea>
                     <button id="analyzeBtn" class="btn btn-primary">
                         🔍 解析文本
@@ -28,7 +37,7 @@
                 </div>
 
                 <div class="sidebar-section" id="extractedSection" style="display: none;">
-                    <h3>🏷️ 提取的标签</h3>
+                    <h4>🏷️ 提取的标签</h4>
                     <div class="filter-tabs">
                         <button class="filter-tab active" data-type="all">全部</button>
                         <button class="filter-tab" data-type="person">人物</button>
@@ -37,6 +46,80 @@
                     </div>
                     <div id="tagsContainer" class="tags-container">
                     </div>
+                </div>
+
+                <div class="sidebar-section" id="naturalGraphSection" style="display: none;">
+                    <h4>🌐 自然语言一键建图</h4>
+                    <p class="section-hint">输入因果关系描述文本，系统将自动生成节点和边。</p>
+                    <textarea 
+                        id="naturalGraphInput" 
+                        placeholder="输入因果描述文本...&#10;&#10;例如：&#10;萨拉热窝事件引发了第一次世界大战，斐迪南大公遇刺是导火索，奥匈帝国向塞尔维亚宣战，随后各国相继卷入战争。"
+                        rows="8"
+                    ></textarea>
+                    <div class="config-group" style="margin-top: 1rem;">
+                        <label style="font-size: 0.8rem; color: #6b7280;">
+                            <input type="checkbox" id="useAIGraph" style="margin-right: 0.25rem;">
+                            使用 AI 智能解析（需配置 API Key）
+                        </label>
+                    </div>
+                    <button id="generateGraphBtn" class="btn btn-primary" style="margin-top: 1rem;">
+                        🚀 一键生成图谱
+                    </button>
+                </div>
+
+                <div class="sidebar-section" id="influenceAnalysisSection" style="display: none;">
+                    <h4>📊 因果影响分析</h4>
+                    <p class="section-hint">计算节点的入度、出度、介数中心性等指标，分析各节点的影响权重。</p>
+                    <button id="analyzeInfluenceBtn" class="btn btn-primary">
+                        📈 开始分析
+                    </button>
+                    <div id="influenceResults" style="display: none; margin-top: 1rem;">
+                        <div class="analysis-summary" id="influenceSummary"></div>
+                        <div class="metrics-list" id="metricsList"></div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section" id="pathQuerySection" style="display: none;">
+                    <h4>🔍 路径查询与关键路径</h4>
+                    <p class="section-hint">指定起点和终点，查询所有可能的因果路径，并识别影响权重最大的关键路径。</p>
+                    
+                    <div class="config-group">
+                        <label for="startNodeSelect">起点节点:</label>
+                        <select id="startNodeSelect" class="config-input">
+                            <option value="">-- 选择起点 --</option>
+                        </select>
+                    </div>
+                    
+                    <div class="config-group">
+                        <label for="endNodeSelect">终点节点:</label>
+                        <select id="endNodeSelect" class="config-input">
+                            <option value="">-- 选择终点 --</option>
+                        </select>
+                    </div>
+                    
+                    <button id="queryPathBtn" class="btn btn-primary">
+                        🔎 查询路径
+                    </button>
+                    
+                    <div id="pathResults" style="display: none; margin-top: 1rem;">
+                        <div class="path-summary" id="pathSummary"></div>
+                        <div class="critical-path" id="criticalPathSection">
+                            <h5>🎯 关键路径（权重最大）</h5>
+                            <div id="criticalPathDisplay"></div>
+                        </div>
+                        <div class="path-list" id="pathList">
+                            <h5>📋 所有路径（按权重排序）</h5>
+                            <div id="allPathsDisplay"></div>
+                        </div>
+                    </div>
+                    
+                    <button id="highlightCriticalPathBtn" class="btn btn-success" style="display: none; margin-top: 1rem;">
+                        ⭐ 高亮关键路径
+                    </button>
+                    
+                    <button id="clearPathHighlightBtn" class="btn btn-secondary" style="display: none; margin-top: 0.5rem;">
+                        🔄 清除路径高亮
+                    </button>
                 </div>
             </aside>
 
