@@ -26,6 +26,12 @@ class CausalCanvasApp {
         this.deepseekApiKey = '';
         this.deepseekModel = 'deepseek-chat';
         
+        this.currentSection = 'text-input';
+        this.influenceResults = null;
+        this.pathResults = null;
+        this.criticalPathNodes = [];
+        this.criticalPathEdges = [];
+        
         this.init();
     }
     
@@ -38,11 +44,36 @@ class CausalCanvasApp {
     }
     
     cacheElements() {
+        this.sectionTabs = document.querySelectorAll('.section-tab');
+        
+        this.textInputSection = document.getElementById('textInputSection');
         this.textInput = document.getElementById('textInput');
         this.analyzeBtn = document.getElementById('analyzeBtn');
         this.extractedSection = document.getElementById('extractedSection');
         this.tagsContainer = document.getElementById('tagsContainer');
         this.filterTabs = document.querySelectorAll('.filter-tab');
+        
+        this.naturalGraphSection = document.getElementById('naturalGraphSection');
+        this.naturalGraphInput = document.getElementById('naturalGraphInput');
+        this.useAIGraph = document.getElementById('useAIGraph');
+        this.generateGraphBtn = document.getElementById('generateGraphBtn');
+        
+        this.influenceAnalysisSection = document.getElementById('influenceAnalysisSection');
+        this.analyzeInfluenceBtn = document.getElementById('analyzeInfluenceBtn');
+        this.influenceResultsEl = document.getElementById('influenceResults');
+        this.influenceSummary = document.getElementById('influenceSummary');
+        this.metricsList = document.getElementById('metricsList');
+        
+        this.pathQuerySection = document.getElementById('pathQuerySection');
+        this.startNodeSelect = document.getElementById('startNodeSelect');
+        this.endNodeSelect = document.getElementById('endNodeSelect');
+        this.queryPathBtn = document.getElementById('queryPathBtn');
+        this.pathResultsEl = document.getElementById('pathResults');
+        this.pathSummary = document.getElementById('pathSummary');
+        this.criticalPathDisplay = document.getElementById('criticalPathDisplay');
+        this.allPathsDisplay = document.getElementById('allPathsDisplay');
+        this.highlightCriticalPathBtn = document.getElementById('highlightCriticalPathBtn');
+        this.clearPathHighlightBtn = document.getElementById('clearPathHighlightBtn');
         
         this.canvas = document.getElementById('canvas');
         this.nodesContainer = document.getElementById('nodesContainer');
@@ -89,11 +120,22 @@ class CausalCanvasApp {
     }
     
     bindEvents() {
+        this.sectionTabs.forEach(tab => {
+            tab.addEventListener('click', () => this.switchSection(tab.dataset.section));
+        });
+        
         this.analyzeBtn.addEventListener('click', () => this.analyzeText());
         
         this.filterTabs.forEach(tab => {
             tab.addEventListener('click', () => this.setFilter(tab.dataset.type));
         });
+        
+        this.generateGraphBtn.addEventListener('click', () => this.generateGraphFromText());
+        this.analyzeInfluenceBtn.addEventListener('click', () => this.analyzeInfluence());
+        
+        this.queryPathBtn.addEventListener('click', () => this.queryPath());
+        this.highlightCriticalPathBtn.addEventListener('click', () => this.highlightCriticalPath());
+        this.clearPathHighlightBtn.addEventListener('click', () => this.clearPathHighlight());
         
         this.clearCanvasBtn.addEventListener('click', () => this.clearCanvas());
         this.generateReportBtn.addEventListener('click', () => this.generateReport());
@@ -159,6 +201,58 @@ class CausalCanvasApp {
                 this.cancelConnection();
                 this.deselectAllNodes();
             }
+        });
+    }
+    
+    switchSection(section) {
+        this.currentSection = section;
+        
+        this.sectionTabs.forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.section === section);
+        });
+        
+        if (this.textInputSection) this.textInputSection.style.display = 'none';
+        if (this.extractedSection) this.extractedSection.style.display = 'none';
+        if (this.naturalGraphSection) this.naturalGraphSection.style.display = 'none';
+        if (this.influenceAnalysisSection) this.influenceAnalysisSection.style.display = 'none';
+        if (this.pathQuerySection) this.pathQuerySection.style.display = 'none';
+        
+        switch(section) {
+            case 'text-input':
+                if (this.textInputSection) this.textInputSection.style.display = 'block';
+                if (this.extractedEntities.length > 0 && this.extractedSection) {
+                    this.extractedSection.style.display = 'block';
+                }
+                break;
+            case 'natural-graph':
+                if (this.naturalGraphSection) this.naturalGraphSection.style.display = 'block';
+                break;
+            case 'influence-analysis':
+                if (this.influenceAnalysisSection) this.influenceAnalysisSection.style.display = 'block';
+                break;
+            case 'path-query':
+                if (this.pathQuerySection) this.pathQuerySection.style.display = 'block';
+                this.updateNodeSelectors();
+                break;
+        }
+    }
+    
+    updateNodeSelectors() {
+        if (!this.startNodeSelect || !this.endNodeSelect) return;
+        
+        this.startNodeSelect.innerHTML = '<option value="">-- 选择起点 --</option>';
+        this.endNodeSelect.innerHTML = '<option value="">-- 选择终点 --</option>';
+        
+        this.nodes.forEach(node => {
+            const option1 = document.createElement('option');
+            option1.value = node.id;
+            option1.textContent = node.label;
+            this.startNodeSelect.appendChild(option1);
+            
+            const option2 = document.createElement('option');
+            option2.value = node.id;
+            option2.textContent = node.label;
+            this.endNodeSelect.appendChild(option2);
         });
     }
     
@@ -1368,6 +1462,564 @@ class CausalCanvasApp {
         setTimeout(() => {
             this.toast.classList.remove('show');
         }, 3000);
+    }
+
+    async analyzeInfluence() {
+        if (this.nodes.length === 0) {
+            this.showToast('请先在画布上添加节点', 'error');
+            return;
+        }
+        
+        const graphData = {
+            nodes: this.nodes.map(n => ({
+                id: n.id,
+                label: n.label,
+                type: n.type
+            })),
+            edges: this.edges.map(e => ({
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                relation: e.relation
+            }))
+        };
+        
+        try {
+            this.showToast('📈 正在分析影响度...', 'info');
+            
+            const response = await fetch('/api/analyze-influence', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(graphData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '分析失败');
+            }
+            
+            const result = await response.json();
+            this.influenceResults = result;
+            
+            this.renderInfluenceResults(result);
+            
+            this.showToast('影响分析完成！', 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '分析失败', 'error');
+        }
+    }
+    
+    renderInfluenceResults(result) {
+        if (!this.influenceSummary || !this.metricsList) return;
+        
+        this.influenceResultsEl.style.display = 'block';
+        
+        const summary = result.summary;
+        this.influenceSummary.innerHTML = `
+            <div class="summary-item">
+                <span class="summary-label">节点总数:</span>
+                <span class="summary-value">${summary.total_nodes}</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">连线总数:</span>
+                <span class="summary-value">${summary.total_edges}</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">平均入度:</span>
+                <span class="summary-value">${summary.avg_in_degree}</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">平均出度:</span>
+                <span class="summary-value">${summary.avg_out_degree}</span>
+            </div>
+        `;
+        
+        this.metricsList.innerHTML = '';
+        
+        result.node_metrics.forEach((metric, index) => {
+            const typeLabels = {
+                'person': '人物',
+                'event': '事件',
+                'noun': '概念'
+            };
+            const typeLabel = typeLabels[metric.type] || metric.type;
+            
+            const rankBadge = index === 0 ? '<span class="rank-badge rank-1">🥇</span>' :
+                              index === 1 ? '<span class="rank-badge rank-2">🥈</span>' :
+                              index === 2 ? '<span class="rank-badge rank-3">🥉</span>' :
+                              `<span class="rank-badge rank-other">#${index + 1}</span>`;
+            
+            const metricItem = document.createElement('div');
+            metricItem.className = 'metric-item';
+            metricItem.innerHTML = `
+                <div class="metric-header">
+                    ${rankBadge}
+                    <span class="metric-label">${metric.label}</span>
+                    <span class="metric-type">${typeLabel}</span>
+                </div>
+                <div class="metric-details">
+                    <div class="metric-detail">
+                        <span class="detail-label">入度</span>
+                        <span class="detail-value">${metric.in_degree}</span>
+                    </div>
+                    <div class="metric-detail">
+                        <span class="detail-label">出度</span>
+                        <span class="detail-value">${metric.out_degree}</span>
+                    </div>
+                    <div class="metric-detail">
+                        <span class="detail-label">总度数</span>
+                        <span class="detail-value">${metric.total_degree}</span>
+                    </div>
+                    <div class="metric-detail">
+                        <span class="detail-label">介数中心性</span>
+                        <span class="detail-value">${metric.betweenness_centrality}</span>
+                    </div>
+                </div>
+                <div class="metric-score">
+                    <span class="score-label">影响得分</span>
+                    <span class="score-value">${metric.influence_score}</span>
+                </div>
+            `;
+            
+            metricItem.addEventListener('click', () => {
+                this.highlightNode(metric.node_id);
+            });
+            
+            this.metricsList.appendChild(metricItem);
+        });
+    }
+    
+    highlightNode(nodeId) {
+        this.clearHighlights();
+        
+        this.highlightedNodes.add(nodeId);
+        
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (!nodeEl) return;
+            
+            if (node.id === nodeId) {
+                nodeEl.classList.add('highlighted');
+            } else {
+                nodeEl.classList.add('dimmed');
+            }
+        });
+    }
+    
+    async queryPath() {
+        if (this.nodes.length === 0) {
+            this.showToast('请先在画布上添加节点', 'error');
+            return;
+        }
+        
+        const startNodeId = this.startNodeSelect.value;
+        const endNodeId = this.endNodeSelect.value;
+        
+        if (!startNodeId || !endNodeId) {
+            this.showToast('请选择起点和终点节点', 'error');
+            return;
+        }
+        
+        if (startNodeId === endNodeId) {
+            this.showToast('起点和终点不能相同', 'error');
+            return;
+        }
+        
+        const graphData = {
+            nodes: this.nodes.map(n => ({
+                id: n.id,
+                label: n.label,
+                type: n.type
+            })),
+            edges: this.edges.map(e => ({
+                id: e.id,
+                source: e.source,
+                target: e.target,
+                relation: e.relation
+            })),
+            start_node_id: startNodeId,
+            end_node_id: endNodeId
+        };
+        
+        try {
+            this.showToast('🔍 正在查询路径...', 'info');
+            
+            const response = await fetch('/api/query-path', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(graphData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '查询失败');
+            }
+            
+            const result = await response.json();
+            this.pathResults = result;
+            
+            this.renderPathResults(result);
+            
+            if (result.paths.length > 0) {
+                this.showToast(result.message, 'success');
+            } else {
+                this.showToast(result.message, 'warning');
+            }
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '查询失败', 'error');
+        }
+    }
+    
+    renderPathResults(result) {
+        if (!this.pathSummary || !this.criticalPathDisplay || !this.allPathsDisplay) return;
+        
+        this.pathResultsEl.style.display = 'block';
+        
+        this.pathSummary.innerHTML = `
+            <div class="summary-item">
+                <span class="summary-label">起点:</span>
+                <span class="summary-value highlight">${result.start_label || result.start_node_id}</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">终点:</span>
+                <span class="summary-value highlight">${result.end_label || result.end_node_id}</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">路径数量:</span>
+                <span class="summary-value">${result.total_paths || 0}</span>
+            </div>
+        `;
+        
+        if (result.critical_path) {
+            this.criticalPathNodes = result.critical_path.node_ids;
+            this.criticalPathEdges = result.critical_path.edges.map(e => e.edge_id);
+            
+            const pathDisplay = this.renderPathDisplay(result.critical_path, true);
+            this.criticalPathDisplay.innerHTML = pathDisplay;
+            
+            this.highlightCriticalPathBtn.style.display = 'block';
+        } else {
+            this.criticalPathDisplay.innerHTML = '<p style="color: #6b7280; text-align: center;">没有找到关键路径</p>';
+            this.highlightCriticalPathBtn.style.display = 'none';
+        }
+        
+        if (result.paths && result.paths.length > 0) {
+            let pathsHtml = '';
+            result.paths.forEach((path, index) => {
+                pathsHtml += `<div class="path-item" data-index="${index}">
+                    <div class="path-header">
+                        <span class="path-rank">#${index + 1}</span>
+                        <span class="path-weight">权重: ${path.weight}</span>
+                        <span class="path-length">边数: ${path.length}</span>
+                    </div>
+                    <div class="path-nodes">
+                        ${path.nodes.map((n, i) => 
+                            `<span class="path-node">${n.label}</span>` +
+                            (i < path.nodes.length - 1 ? 
+                                `<span class="path-arrow">→</span>` : ''
+                            )
+                        ).join('')}
+                    </div>
+                </div>`;
+            });
+            this.allPathsDisplay.innerHTML = pathsHtml;
+            
+            document.querySelectorAll('.path-item').forEach((item, index) => {
+                item.addEventListener('click', () => {
+                    this.highlightPath(result.paths[index]);
+                });
+            });
+        } else {
+            this.allPathsDisplay.innerHTML = '<p style="color: #6b7280; text-align: center;">没有找到可用路径</p>';
+        }
+        
+        this.clearPathHighlightBtn.style.display = 'block';
+    }
+    
+    renderPathDisplay(path, isCritical) {
+        const nodesHtml = path.nodes.map((n, i) => {
+            const edgeLabel = i < path.edges.length ? path.edges[i].relation : '';
+            return `<span class="path-node-display">${n.label}</span>` +
+                   (i < path.nodes.length - 1 ? 
+                    `<span class="path-edge-display">${edgeLabel}</span>` : '');
+        }).join('');
+        
+        return `
+            <div class="path-display ${isCritical ? 'critical' : ''}">
+                <div class="path-nodes-display">
+                    ${nodesHtml}
+                </div>
+                <div class="path-meta">
+                    <span class="meta-item">权重: <strong>${path.weight}</strong></span>
+                    <span class="meta-item">边数: <strong>${path.length}</strong></span>
+                </div>
+            </div>
+        `;
+    }
+    
+    highlightCriticalPath() {
+        if (!this.criticalPathNodes || this.criticalPathNodes.length === 0) {
+            this.showToast('没有可高亮的关键路径', 'error');
+            return;
+        }
+        
+        this.clearHighlights();
+        
+        this.criticalPathNodes.forEach(nodeId => {
+            this.highlightedNodes.add(nodeId);
+        });
+        
+        this.criticalPathEdges.forEach(edgeId => {
+            this.highlightedEdges.add(edgeId);
+        });
+        
+        this.applyPathHighlights();
+        
+        this.showToast('关键路径已高亮', 'success');
+    }
+    
+    highlightPath(path) {
+        this.clearHighlights();
+        
+        path.node_ids.forEach(nodeId => {
+            this.highlightedNodes.add(nodeId);
+        });
+        
+        path.edges.forEach(edge => {
+            this.highlightedEdges.add(edge.edge_id);
+        });
+        
+        this.applyPathHighlights();
+    }
+    
+    applyPathHighlights() {
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (!nodeEl) return;
+            
+            if (this.highlightedNodes.has(node.id)) {
+                nodeEl.classList.add('highlighted');
+                nodeEl.classList.add('path-highlight');
+            } else {
+                nodeEl.classList.add('dimmed');
+            }
+        });
+        
+        this.edges.forEach(edge => {
+            const edgeEl = document.getElementById(edge.id);
+            if (!edgeEl) return;
+            
+            const line = edgeEl.querySelector('.edge-line');
+            const label = edgeEl.querySelector('.edge-label');
+            const labelBg = edgeEl.querySelector('.edge-label-bg');
+            
+            if (this.highlightedEdges.has(edge.id)) {
+                if (line) {
+                    line.classList.add('highlighted');
+                    line.classList.add('path-highlight');
+                }
+                if (label) {
+                    label.classList.add('highlighted');
+                    label.classList.add('path-highlight');
+                }
+                if (labelBg) {
+                    labelBg.classList.add('highlighted');
+                    labelBg.classList.add('path-highlight');
+                }
+            } else {
+                if (line) line.classList.add('dimmed');
+                if (label) label.classList.add('dimmed');
+                if (labelBg) labelBg.classList.add('dimmed');
+            }
+        });
+    }
+    
+    clearPathHighlight() {
+        this.criticalPathNodes = [];
+        this.criticalPathEdges = [];
+        this.clearHighlights();
+        this.showToast('路径高亮已清除', 'success');
+    }
+    
+    async generateGraphFromText() {
+        const text = this.naturalGraphInput.value.trim();
+        if (!text) {
+            this.showToast('请输入因果描述文本', 'error');
+            return;
+        }
+        
+        const useAI = this.useAIGraph.checked;
+        
+        if (useAI && !this.deepseekApiKey) {
+            this.showToast('使用 AI 解析需要先配置 API Key', 'error');
+            return;
+        }
+        
+        const requestData = {
+            text: text
+        };
+        
+        if (useAI) {
+            requestData.api_key = this.deepseekApiKey;
+            requestData.model = this.deepseekModel;
+        }
+        
+        try {
+            this.showToast('🚀 正在生成图谱...', 'info');
+            
+            const response = await fetch('/api/natural-language-graph', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '生成失败');
+            }
+            
+            const result = await response.json();
+            
+            if (result.nodes.length === 0) {
+                this.showToast(result.message || '未能提取足够的实体', 'error');
+                return;
+            }
+            
+            this.nodes = [];
+            this.edges = [];
+            this.nodesContainer.innerHTML = '';
+            
+            const defs = this.edgesSvg.querySelector('defs');
+            this.edgesSvg.innerHTML = '';
+            if (defs) {
+                this.edgesSvg.appendChild(defs);
+            }
+            
+            const canvasRect = this.canvas.getBoundingClientRect();
+            const nodeCount = result.nodes.length;
+            const centerX = canvasRect.width / 2;
+            const centerY = canvasRect.height / 2;
+            const radius = Math.min(canvasRect.width, canvasRect.height) * 0.35;
+            
+            result.nodes.forEach((node, index) => {
+                const angle = (2 * Math.PI * index) / nodeCount - Math.PI / 2;
+                const x = centerX + radius * Math.cos(angle) - 60;
+                const y = centerY + radius * Math.sin(angle) - 20;
+                
+                const nodeData = {
+                    id: node.id,
+                    label: node.label,
+                    type: node.type,
+                    x: Math.max(20, x),
+                    y: Math.max(20, y),
+                    selected: false
+                };
+                
+                this.nodes.push(nodeData);
+                this.renderNode(nodeData);
+                
+                const nodeNum = parseInt(node.id.replace('n', ''));
+                if (nodeNum > this.nodeIdCounter) {
+                    this.nodeIdCounter = nodeNum;
+                }
+            });
+            
+            result.edges.forEach(edge => {
+                const edgeData = {
+                    id: edge.id || `edge-${++this.edgeIdCounter}`,
+                    source: edge.source,
+                    target: edge.target,
+                    sourcePosition: 'right',
+                    targetPosition: 'left',
+                    relation: edge.relation
+                };
+                
+                const sourceExists = this.nodes.find(n => n.id === edge.source);
+                const targetExists = this.nodes.find(n => n.id === edge.target);
+                
+                if (sourceExists && targetExists) {
+                    this.edges.push(edgeData);
+                    this.renderEdge(edgeData);
+                    
+                    if (edge.id) {
+                        const edgeNum = parseInt(edge.id.replace('e', ''));
+                        if (edgeNum > this.edgeIdCounter) {
+                            this.edgeIdCounter = edgeNum;
+                        }
+                    }
+                }
+            });
+            
+            this.updateCounts();
+            
+            const methodText = result.method === 'ai' ? 'AI 智能解析' : '规则解析';
+            this.showToast(`图谱已生成 (${methodText}): ${result.nodes.length} 个节点, ${result.edges.length} 条边`, 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '生成失败', 'error');
+        }
+    }
+    
+    applyHighlights() {
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (!nodeEl) return;
+            
+            if (this.highlightedNodes.has(node.id)) {
+                nodeEl.classList.add('highlighted');
+            } else {
+                nodeEl.classList.add('dimmed');
+            }
+        });
+        
+        this.edges.forEach(edge => {
+            const edgeEl = document.getElementById(edge.id);
+            if (!edgeEl) return;
+            
+            const line = edgeEl.querySelector('.edge-line');
+            const label = edgeEl.querySelector('.edge-label');
+            const labelBg = edgeEl.querySelector('.edge-label-bg');
+            
+            if (this.highlightedEdges.has(edge.id)) {
+                if (line) line.classList.add('highlighted');
+                if (label) label.classList.add('highlighted');
+                if (labelBg) labelBg.classList.add('highlighted');
+            } else {
+                if (line) line.classList.add('dimmed');
+                if (label) label.classList.add('dimmed');
+                if (labelBg) labelBg.classList.add('dimmed');
+            }
+        });
+    }
+    
+    clearHighlights() {
+        this.highlightedNodes.clear();
+        this.highlightedEdges.clear();
+        
+        this.nodes.forEach(node => {
+            const nodeEl = document.getElementById(node.id);
+            if (nodeEl) {
+                nodeEl.classList.remove('highlighted', 'dimmed', 'path-highlight');
+            }
+        });
+        
+        this.edges.forEach(edge => {
+            const edgeEl = document.getElementById(edge.id);
+            if (!edgeEl) return;
+            
+            const line = edgeEl.querySelector('.edge-line');
+            const label = edgeEl.querySelector('.edge-label');
+            const labelBg = edgeEl.querySelector('.edge-label-bg');
+            
+            if (line) line.classList.remove('highlighted', 'dimmed', 'path-highlight');
+            if (label) label.classList.remove('highlighted', 'dimmed', 'path-highlight');
+            if (labelBg) labelBg.classList.remove('highlighted', 'dimmed', 'path-highlight');
+        });
     }
 }
 
