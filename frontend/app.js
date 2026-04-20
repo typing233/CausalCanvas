@@ -58,6 +58,24 @@ class CausalCanvasApp {
         this.useAIGraph = document.getElementById('useAIGraph');
         this.generateGraphBtn = document.getElementById('generateGraphBtn');
         
+        this.naturalGraphApiKey = document.getElementById('naturalGraphApiKey');
+        this.naturalGraphModel = document.getElementById('naturalGraphModel');
+        this.saveNaturalGraphConfigBtn = document.getElementById('saveNaturalGraphConfigBtn');
+        this.testConnectionBtn = document.getElementById('testConnectionBtn');
+        this.configToggle = document.querySelector('.config-toggle');
+        this.configToggleIcon = document.getElementById('configToggleIcon');
+        this.configContent = document.getElementById('configContent');
+        
+        this.parseModeRadios = document.querySelectorAll('input[name="parseMode"]');
+        this.modeOptions = document.querySelectorAll('.mode-option');
+        
+        this.settingsSection = document.getElementById('settingsSection');
+        this.settingsApiKey = document.getElementById('settingsApiKey');
+        this.settingsModel = document.getElementById('settingsModel');
+        this.saveSettingsBtn = document.getElementById('saveSettingsBtn');
+        this.testApiKeyBtn = document.getElementById('testApiKeyBtn');
+        this.apiStatus = document.getElementById('apiStatus');
+        
         this.influenceAnalysisSection = document.getElementById('influenceAnalysisSection');
         this.analyzeInfluenceBtn = document.getElementById('analyzeInfluenceBtn');
         this.influenceResultsEl = document.getElementById('influenceResults');
@@ -136,6 +154,32 @@ class CausalCanvasApp {
         this.queryPathBtn.addEventListener('click', () => this.queryPath());
         this.highlightCriticalPathBtn.addEventListener('click', () => this.highlightCriticalPath());
         this.clearPathHighlightBtn.addEventListener('click', () => this.clearPathHighlight());
+        
+        if (this.configToggle) {
+            this.configToggle.addEventListener('click', () => this.toggleConfigSection());
+        }
+        
+        if (this.saveNaturalGraphConfigBtn) {
+            this.saveNaturalGraphConfigBtn.addEventListener('click', () => this.saveNaturalGraphConfig());
+        }
+        
+        if (this.testConnectionBtn) {
+            this.testConnectionBtn.addEventListener('click', () => this.testApiConnection());
+        }
+        
+        if (this.parseModeRadios) {
+            this.parseModeRadios.forEach(radio => {
+                radio.addEventListener('change', (e) => this.handleParseModeChange(e.target.value));
+            });
+        }
+        
+        if (this.saveSettingsBtn) {
+            this.saveSettingsBtn.addEventListener('click', () => this.saveGlobalSettings());
+        }
+        
+        if (this.testApiKeyBtn) {
+            this.testApiKeyBtn.addEventListener('click', () => this.testApiKey());
+        }
         
         this.clearCanvasBtn.addEventListener('click', () => this.clearCanvas());
         this.generateReportBtn.addEventListener('click', () => this.generateReport());
@@ -216,6 +260,7 @@ class CausalCanvasApp {
         if (this.naturalGraphSection) this.naturalGraphSection.style.display = 'none';
         if (this.influenceAnalysisSection) this.influenceAnalysisSection.style.display = 'none';
         if (this.pathQuerySection) this.pathQuerySection.style.display = 'none';
+        if (this.settingsSection) this.settingsSection.style.display = 'none';
         
         switch(section) {
             case 'text-input':
@@ -226,6 +271,7 @@ class CausalCanvasApp {
                 break;
             case 'natural-graph':
                 if (this.naturalGraphSection) this.naturalGraphSection.style.display = 'block';
+                this.updateConfigFieldsFromStorage();
                 break;
             case 'influence-analysis':
                 if (this.influenceAnalysisSection) this.influenceAnalysisSection.style.display = 'block';
@@ -233,6 +279,10 @@ class CausalCanvasApp {
             case 'path-query':
                 if (this.pathQuerySection) this.pathQuerySection.style.display = 'block';
                 this.updateNodeSelectors();
+                break;
+            case 'settings':
+                if (this.settingsSection) this.settingsSection.style.display = 'block';
+                this.updateSettingsFieldsFromStorage();
                 break;
         }
     }
@@ -2020,6 +2070,334 @@ class CausalCanvasApp {
             if (label) label.classList.remove('highlighted', 'dimmed', 'path-highlight');
             if (labelBg) labelBg.classList.remove('highlighted', 'dimmed', 'path-highlight');
         });
+    }
+    
+    updateConfigFieldsFromStorage() {
+        if (this.naturalGraphApiKey && this.deepseekApiKey) {
+            this.naturalGraphApiKey.value = this.deepseekApiKey;
+        }
+        if (this.naturalGraphModel && this.deepseekModel) {
+            this.naturalGraphModel.value = this.deepseekModel;
+        }
+    }
+    
+    updateSettingsFieldsFromStorage() {
+        if (this.settingsApiKey && this.deepseekApiKey) {
+            this.settingsApiKey.value = this.deepseekApiKey;
+        }
+        if (this.settingsModel && this.deepseekModel) {
+            this.settingsModel.value = this.deepseekModel;
+        }
+    }
+    
+    toggleConfigSection() {
+        if (!this.configContent || !this.configToggleIcon) return;
+        
+        const isVisible = this.configContent.style.display !== 'none';
+        this.configContent.style.display = isVisible ? 'none' : 'block';
+        this.configToggleIcon.textContent = isVisible ? '▼' : '▲';
+    }
+    
+    saveNaturalGraphConfig() {
+        if (!this.naturalGraphApiKey) return;
+        
+        const apiKey = this.naturalGraphApiKey.value.trim();
+        const model = this.naturalGraphModel ? this.naturalGraphModel.value : 'deepseek-chat';
+        
+        if (!apiKey) {
+            this.showToast('请输入 API Key', 'error');
+            return;
+        }
+        
+        this.deepseekApiKey = apiKey;
+        this.deepseekModel = model;
+        
+        localStorage.setItem('deepseekApiKey', apiKey);
+        localStorage.setItem('deepseekModel', model);
+        
+        if (this.settingsApiKey) {
+            this.settingsApiKey.value = apiKey;
+        }
+        if (this.settingsModel) {
+            this.settingsModel.value = model;
+        }
+        if (this.deepseekApiKeyInput) {
+            this.deepseekApiKeyInput.value = apiKey;
+        }
+        if (this.deepseekModelSelect) {
+            this.deepseekModelSelect.value = model;
+        }
+        
+        this.showToast('API 配置已保存', 'success');
+    }
+    
+    async testApiConnection() {
+        const apiKey = this.naturalGraphApiKey ? this.naturalGraphApiKey.value.trim() : '';
+        if (!apiKey) {
+            this.showToast('请先输入 API Key', 'error');
+            return;
+        }
+        
+        this.showToast('🧪 正在测试 API 连接...', 'info');
+        
+        try {
+            const testMessages = [
+                {"role": "user", "content": "Hello, please reply with a simple 'OK'."}
+            ];
+            
+            const response = await fetch('/api/ai-generate-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nodes: [{"id": "test", "label": "Test", "type": "noun"}],
+                    edges: [],
+                    api_key: apiKey,
+                    model: this.deepseekModel
+                })
+            });
+            
+            if (response.ok) {
+                this.showToast('✅ API 连接测试成功！', 'success');
+            } else {
+                const error = await response.json();
+                this.showToast('❌ API 连接失败: ' + (error.detail || '未知错误'), 'error');
+            }
+        } catch (error) {
+            this.showToast('❌ API 连接失败: ' + error.message, 'error');
+        }
+    }
+    
+    handleParseModeChange(mode) {
+        if (!this.modeOptions) return;
+        
+        this.modeOptions.forEach(option => {
+            const radio = option.querySelector('input[type="radio"]');
+            if (radio && radio.value === mode) {
+                option.classList.add('active');
+                option.style.borderColor = '#6366f1';
+                option.style.backgroundColor = '#eef2ff';
+                const label = option.querySelector('div:first-child');
+                if (label) label.style.color = '#4f46e5';
+            } else {
+                option.classList.remove('active');
+                option.style.borderColor = '#e5e7eb';
+                option.style.backgroundColor = 'white';
+                const label = option.querySelector('div:first-child');
+                if (label) label.style.color = '#1f2937';
+            }
+        });
+    }
+    
+    saveGlobalSettings() {
+        if (!this.settingsApiKey) return;
+        
+        const apiKey = this.settingsApiKey.value.trim();
+        const model = this.settingsModel ? this.settingsModel.value : 'deepseek-chat';
+        
+        if (!apiKey) {
+            this.showToast('请输入 API Key', 'error');
+            return;
+        }
+        
+        this.deepseekApiKey = apiKey;
+        this.deepseekModel = model;
+        
+        localStorage.setItem('deepseekApiKey', apiKey);
+        localStorage.setItem('deepseekModel', model);
+        
+        if (this.naturalGraphApiKey) {
+            this.naturalGraphApiKey.value = apiKey;
+        }
+        if (this.naturalGraphModel) {
+            this.naturalGraphModel.value = model;
+        }
+        if (this.deepseekApiKeyInput) {
+            this.deepseekApiKeyInput.value = apiKey;
+        }
+        if (this.deepseekModelSelect) {
+            this.deepseekModelSelect.value = model;
+        }
+        
+        this.showToast('全局设置已保存', 'success');
+    }
+    
+    async testApiKey() {
+        const apiKey = this.settingsApiKey ? this.settingsApiKey.value.trim() : '';
+        if (!apiKey) {
+            this.showToast('请先输入 API Key', 'error');
+            return;
+        }
+        
+        const statusEl = this.apiStatus;
+        if (statusEl) {
+            statusEl.style.display = 'block';
+            statusEl.style.backgroundColor = '#dbeafe';
+            statusEl.style.color = '#1e40af';
+            statusEl.textContent = '🧪 正在测试 API 连接...';
+        }
+        
+        this.showToast('🧪 正在测试 API 连接...', 'info');
+        
+        try {
+            const response = await fetch('/api/ai-generate-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nodes: [{"id": "test", "label": "Test", "type": "noun"}],
+                    edges: [],
+                    api_key: apiKey,
+                    model: this.deepseekModel
+                })
+            });
+            
+            if (response.ok) {
+                if (statusEl) {
+                    statusEl.style.backgroundColor = '#d1fae5';
+                    statusEl.style.color = '#065f46';
+                    statusEl.textContent = '✅ API 连接测试成功！';
+                }
+                this.showToast('✅ API 连接测试成功！', 'success');
+            } else {
+                const error = await response.json();
+                if (statusEl) {
+                    statusEl.style.backgroundColor = '#fee2e2';
+                    statusEl.style.color = '#991b1b';
+                    statusEl.textContent = '❌ API 连接失败: ' + (error.detail || '未知错误');
+                }
+                this.showToast('❌ API 连接失败', 'error');
+            }
+        } catch (error) {
+            if (statusEl) {
+                statusEl.style.backgroundColor = '#fee2e2';
+                statusEl.style.color = '#991b1b';
+                statusEl.textContent = '❌ API 连接失败: ' + error.message;
+            }
+            this.showToast('❌ API 连接失败', 'error');
+        }
+    }
+    
+    async generateGraphFromText() {
+        const text = this.naturalGraphInput.value.trim();
+        if (!text) {
+            this.showToast('请输入因果描述文本', 'error');
+            return;
+        }
+        
+        let useAI = false;
+        if (this.parseModeRadios && this.parseModeRadios.length > 0) {
+            const checkedRadio = Array.from(this.parseModeRadios).find(r => r.checked);
+            useAI = checkedRadio && checkedRadio.value === 'ai';
+        }
+        
+        if (useAI && !this.deepseekApiKey) {
+            this.showToast('使用 AI 智能解析需要先配置 API Key', 'error');
+            return;
+        }
+        
+        const requestData = {
+            text: text
+        };
+        
+        if (useAI) {
+            requestData.api_key = this.deepseekApiKey;
+            requestData.model = this.deepseekModel;
+        }
+        
+        try {
+            this.showToast('🚀 正在生成图谱...', 'info');
+            
+            const response = await fetch('/api/natural-language-graph', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '生成失败');
+            }
+            
+            const result = await response.json();
+            
+            if (result.nodes.length === 0) {
+                this.showToast(result.message || '未能提取足够的实体', 'error');
+                return;
+            }
+            
+            this.nodes = [];
+            this.edges = [];
+            this.nodesContainer.innerHTML = '';
+            
+            const defs = this.edgesSvg.querySelector('defs');
+            this.edgesSvg.innerHTML = '';
+            if (defs) {
+                this.edgesSvg.appendChild(defs);
+            }
+            
+            const canvasRect = this.canvas.getBoundingClientRect();
+            const nodeCount = result.nodes.length;
+            const centerX = canvasRect.width / 2;
+            const centerY = canvasRect.height / 2;
+            const radius = Math.min(canvasRect.width, canvasRect.height) * 0.35;
+            
+            result.nodes.forEach((node, index) => {
+                const angle = (2 * Math.PI * index) / nodeCount - Math.PI / 2;
+                const x = centerX + radius * Math.cos(angle) - 60;
+                const y = centerY + radius * Math.sin(angle) - 20;
+                
+                const nodeData = {
+                    id: node.id,
+                    label: node.label,
+                    type: node.type,
+                    x: Math.max(20, x),
+                    y: Math.max(20, y),
+                    selected: false
+                };
+                
+                this.nodes.push(nodeData);
+                this.renderNode(nodeData);
+                
+                const nodeNum = parseInt(node.id.replace('n', ''));
+                if (nodeNum > this.nodeIdCounter) {
+                    this.nodeIdCounter = nodeNum;
+                }
+            });
+            
+            result.edges.forEach(edge => {
+                const edgeData = {
+                    id: edge.id || `edge-${++this.edgeIdCounter}`,
+                    source: edge.source,
+                    target: edge.target,
+                    sourcePosition: 'right',
+                    targetPosition: 'left',
+                    relation: edge.relation
+                };
+                
+                const sourceExists = this.nodes.find(n => n.id === edge.source);
+                const targetExists = this.nodes.find(n => n.id === edge.target);
+                
+                if (sourceExists && targetExists) {
+                    this.edges.push(edgeData);
+                    this.renderEdge(edgeData);
+                    
+                    if (edge.id) {
+                        const edgeNum = parseInt(edge.id.replace('e', ''));
+                        if (edgeNum > this.edgeIdCounter) {
+                            this.edgeIdCounter = edgeNum;
+                        }
+                    }
+                }
+            });
+            
+            this.updateCounts();
+            
+            const methodText = result.method === 'ai' ? 'AI 智能解析' : '规则解析';
+            this.showToast(`图谱已生成 (${methodText}): ${result.nodes.length} 个节点, ${result.edges.length} 条边`, 'success');
+            
+        } catch (error) {
+            console.error('Error:', error);
+            this.showToast(error.message || '生成失败', 'error');
+        }
     }
 }
 

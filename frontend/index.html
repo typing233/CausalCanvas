@@ -21,6 +21,7 @@
                         <button class="section-tab" data-section="natural-graph">🌐 一键建图</button>
                         <button class="section-tab" data-section="influence-analysis">📊 影响分析</button>
                         <button class="section-tab" data-section="path-query">🔍 路径查询</button>
+                        <button class="section-tab" data-section="settings">⚙️ 设置</button>
                     </div>
                 </div>
 
@@ -54,17 +55,106 @@
                     <textarea 
                         id="naturalGraphInput" 
                         placeholder="输入因果描述文本...&#10;&#10;例如：&#10;萨拉热窝事件引发了第一次世界大战，斐迪南大公遇刺是导火索，奥匈帝国向塞尔维亚宣战，随后各国相继卷入战争。"
-                        rows="8"
+                        rows="6"
                     ></textarea>
-                    <div class="config-group" style="margin-top: 1rem;">
-                        <label style="font-size: 0.8rem; color: #6b7280;">
-                            <input type="checkbox" id="useAIGraph" style="margin-right: 0.25rem;">
-                            使用 AI 智能解析（需配置 API Key）
+                    
+                    <div class="config-section" id="naturalGraphConfig" style="margin-top: 1rem; padding: 0.75rem; background-color: #f8fafc; border-radius: 0.5rem; border: 1px solid #e5e7eb;">
+                        <div class="config-toggle" style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; margin-bottom: 0.5rem;">
+                            <span style="font-size: 0.85rem; font-weight: 600; color: var(--text-color);">⚙️ AI 智能解析配置</span>
+                            <span id="configToggleIcon" style="font-size: 0.8rem; color: var(--text-muted);">▼</span>
+                        </div>
+                        <div id="configContent" style="display: block;">
+                            <div class="config-group" style="margin-bottom: 0.5rem;">
+                                <label for="naturalGraphApiKey" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">DeepSeek API Key:</label>
+                                <input type="password" id="naturalGraphApiKey" placeholder="sk-..." class="config-input" style="width: 100%; padding: 0.375rem 0.5rem; font-size: 0.8rem;">
+                            </div>
+                            <div class="config-group" style="margin-bottom: 0.5rem;">
+                                <label for="naturalGraphModel" style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">模型选择:</label>
+                                <select id="naturalGraphModel" class="config-input" style="width: 100%; padding: 0.375rem 0.5rem; font-size: 0.8rem;">
+                                    <option value="deepseek-chat">deepseek-chat</option>
+                                    <option value="deepseek-reasoner">deepseek-reasoner</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button id="saveNaturalGraphConfigBtn" class="btn btn-sm btn-primary" style="flex: 1; font-size: 0.75rem; padding: 0.375rem 0.75rem;">
+                                    💾 保存配置
+                                </button>
+                                <button id="testConnectionBtn" class="btn btn-sm btn-secondary" style="flex: 1; font-size: 0.75rem; padding: 0.375rem 0.75rem;">
+                                    🧪 测试连接
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="parse-mode-select" style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <label class="mode-option" style="flex: 1; min-width: 120px; padding: 0.5rem; border: 2px solid #e5e7eb; border-radius: 0.5rem; cursor: pointer; transition: all 0.2s; text-align: center;">
+                            <input type="radio" name="parseMode" value="simple" checked style="display: none;">
+                            <div style="font-size: 0.8rem; font-weight: 600;">📋 规则解析</div>
+                            <div style="font-size: 0.7rem; color: #6b7280; margin-top: 0.25rem;">无需 API Key</div>
+                        </label>
+                        <label class="mode-option active" style="flex: 1; min-width: 120px; padding: 0.5rem; border: 2px solid #6366f1; border-radius: 0.5rem; cursor: pointer; transition: all 0.2s; text-align: center; background-color: #eef2ff;">
+                            <input type="radio" name="parseMode" value="ai" style="display: none;">
+                            <div style="font-size: 0.8rem; font-weight: 600; color: #4f46e5;">🤖 AI 智能解析</div>
+                            <div style="font-size: 0.7rem; color: #6366f1; margin-top: 0.25rem;">效果更好</div>
                         </label>
                     </div>
+                    
                     <button id="generateGraphBtn" class="btn btn-primary" style="margin-top: 1rem;">
                         🚀 一键生成图谱
                     </button>
+                </div>
+
+                <div class="sidebar-section" id="settingsSection" style="display: none;">
+                    <h4>⚙️ 系统设置</h4>
+                    
+                    <div class="settings-group" style="margin-bottom: 1.5rem;">
+                        <h5 style="font-size: 0.9rem; font-weight: 600; color: var(--text-color); margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
+                            🤖 AI 配置 (DeepSeek)
+                        </h5>
+                        <p class="section-hint" style="margin-bottom: 0.75rem;">
+                            配置 DeepSeek API Key 以启用 AI 智能解析、AI 生成报告等高级功能。
+                        </p>
+                        <div class="config-group">
+                            <label for="settingsApiKey" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">API Key:</label>
+                            <input type="password" id="settingsApiKey" placeholder="输入您的 DeepSeek API Key (sk-...)" class="config-input">
+                        </div>
+                        <div class="config-group">
+                            <label for="settingsModel" style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">默认模型:</label>
+                            <select id="settingsModel" class="config-input">
+                                <option value="deepseek-chat">deepseek-chat (推荐，适合大多数任务)</option>
+                                <option value="deepseek-reasoner">deepseek-reasoner (推理能力更强)</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                            <button id="saveSettingsBtn" class="btn btn-primary" style="flex: 1;">
+                                💾 保存设置
+                            </button>
+                            <button id="testApiKeyBtn" class="btn btn-secondary" style="flex: 1;">
+                                🧪 测试连接
+                            </button>
+                        </div>
+                        <div id="apiStatus" style="margin-top: 0.75rem; padding: 0.5rem; border-radius: 0.375rem; font-size: 0.8rem; display: none;"></div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <h5 style="font-size: 0.9rem; font-weight: 600; color: var(--text-color); margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
+                            ℹ️ 关于
+                        </h5>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
+                            <p><strong>CausalCanvas</strong> - 交互式知识重构工具</p>
+                            <p style="margin-top: 0.5rem;">版本: 1.1.0</p>
+                            <p style="margin-top: 0.25rem;">
+                                功能特性：
+                            </p>
+                            <ul style="margin-top: 0.25rem; padding-left: 1.25rem;">
+                                <li>文本解析与标签提取</li>
+                                <li>自然语言一键建图</li>
+                                <li>节点影响度分析</li>
+                                <li>路径查询与关键路径识别</li>
+                                <li>AI 智能报告生成</li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="sidebar-section" id="influenceAnalysisSection" style="display: none;">
