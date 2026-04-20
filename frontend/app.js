@@ -2508,12 +2508,10 @@ class CausalCanvasApp {
         
         const hasCycle = this.detectCycle(adjacencyList, nodes.map(n => n.id));
         
-        if (!hasCycle && nodes.length <= 20) {
-            return this.hierarchicalLayout(nodes, edges, inDegree, outDegree, adjacencyList, canvasRect);
-        } else if (nodes.length <= 15) {
-            return this.improvedCircularLayout(nodes, edges, inDegree, outDegree, canvasRect);
+        if (!hasCycle) {
+            return this.intelligentHierarchicalLayout(nodes, edges, inDegree, outDegree, adjacencyList, canvasRect);
         } else {
-            return this.forceDirectedLayout(nodes, edges, canvasRect);
+            return this.improvedForceDirectedLayout(nodes, edges, inDegree, outDegree, canvasRect);
         }
     }
     
@@ -2543,12 +2541,20 @@ class CausalCanvasApp {
         return false;
     }
     
-    hierarchicalLayout(nodes, edges, inDegree, outDegree, adjacencyList, canvasRect) {
+    intelligentHierarchicalLayout(nodes, edges, inDegree, outDegree, adjacencyList, canvasRect) {
         const positions = {};
         const levels = [];
         const nodeLevel = {};
         const tempInDegree = { ...inDegree };
         const nodeIds = nodes.map(n => n.id);
+        const nodeMap = {};
+        nodes.forEach(n => nodeMap[n.id] = n);
+        
+        const NODE_WIDTH = 140;
+        const NODE_HEIGHT = 50;
+        const HORIZONTAL_GAP = 60;
+        const VERTICAL_GAP = 100;
+        const PADDING = 40;
         
         let level = 0;
         let remainingNodes = new Set(nodeIds);
@@ -2582,124 +2588,89 @@ class CausalCanvasApp {
             level++;
         }
         
-        const padding = 60;
-        const usableWidth = canvasRect.width - padding * 2;
-        const usableHeight = canvasRect.height - padding * 2;
+        const levelWidths = [];
+        levels.forEach(levelNodes => {
+            const totalWidth = levelNodes.length * NODE_WIDTH + (levelNodes.length - 1) * HORIZONTAL_GAP;
+            levelWidths.push(totalWidth);
+        });
         
-        const levelCount = levels.length;
-        const levelHeight = levelCount > 1 ? usableHeight / (levelCount - 1) : usableHeight / 2;
+        const maxLevelWidth = Math.max(...levelWidths);
+        const totalHeight = levels.length * NODE_HEIGHT + (levels.length - 1) * VERTICAL_GAP;
+        
+        const scaleX = Math.min(1, (canvasRect.width - PADDING * 2) / maxLevelWidth);
+        const scaleY = Math.min(1, (canvasRect.height - PADDING * 2) / totalHeight);
+        const scale = Math.min(scaleX, scaleY, 1.2);
+        
+        const scaledNodeWidth = NODE_WIDTH * scale;
+        const scaledNodeHeight = NODE_HEIGHT * scale;
+        const scaledHorizontalGap = HORIZONTAL_GAP * scale;
+        const scaledVerticalGap = VERTICAL_GAP * scale;
+        
+        const newMaxWidth = Math.max(...levelWidths.map(w => {
+            const levelNodes = levels[levelWidths.indexOf(w)];
+            return levelNodes.length * scaledNodeWidth + (levelNodes.length - 1) * scaledHorizontalGap;
+        }));
+        const newTotalHeight = levels.length * scaledNodeHeight + (levels.length - 1) * scaledVerticalGap;
+        
+        const offsetX = PADDING + (canvasRect.width - PADDING * 2 - newMaxWidth) / 2;
+        const offsetY = PADDING + (canvasRect.height - PADDING * 2 - newTotalHeight) / 2;
         
         levels.forEach((levelNodes, levelIndex) => {
-            const nodeCount = levelNodes.length;
-            const levelWidth = nodeCount > 1 ? usableWidth / (nodeCount - 1) : usableWidth / 2;
+            const levelWidth = levelNodes.length * scaledNodeWidth + (levelNodes.length - 1) * scaledHorizontalGap;
+            const levelStartX = offsetX + (newMaxWidth - levelWidth) / 2;
             
             levelNodes.forEach((nodeId, nodeIndex) => {
-                let x, y;
+                const x = levelStartX + nodeIndex * (scaledNodeWidth + scaledHorizontalGap);
+                const y = offsetY + levelIndex * (scaledNodeHeight + scaledVerticalGap);
                 
-                if (levelCount === 1) {
-                    y = canvasRect.height / 2 - 20;
-                } else {
-                    y = padding + levelHeight * levelIndex - 20;
-                }
-                
-                if (nodeCount === 1) {
-                    x = canvasRect.width / 2 - 60;
-                } else {
-                    x = padding + levelWidth * nodeIndex - 60;
-                }
-                
-                x = Math.max(padding, Math.min(x, canvasRect.width - padding - 120));
-                y = Math.max(padding, Math.min(y, canvasRect.height - padding - 40));
-                
-                positions[nodeId] = { x, y };
+                positions[nodeId] = { 
+                    x: Math.max(PADDING, Math.min(x, canvasRect.width - PADDING - 120)), 
+                    y: Math.max(PADDING, Math.min(y, canvasRect.height - PADDING - 40)) 
+                };
             });
         });
         
         return positions;
     }
     
-    improvedCircularLayout(nodes, edges, inDegree, outDegree, canvasRect) {
-        const positions = {};
-        const nodeCount = nodes.length;
-        
-        const nodeImportance = {};
-        nodes.forEach(node => {
-            const totalDegree = inDegree[node.id] + outDegree[node.id];
-            nodeImportance[node.id] = {
-                totalDegree,
-                inDegree: inDegree[node.id],
-                outDegree: outDegree[node.id],
-                isRoot: inDegree[node.id] === 0,
-                isLeaf: outDegree[node.id] === 0
-            };
-        });
-        
-        const sortedNodes = [...nodes].sort((a, b) => {
-            const aImp = nodeImportance[a.id];
-            const bImp = nodeImportance[b.id];
-            
-            if (aImp.isRoot && !bImp.isRoot) return -1;
-            if (!aImp.isRoot && bImp.isRoot) return 1;
-            
-            if (aImp.isLeaf && !bImp.isLeaf) return 1;
-            if (!aImp.isLeaf && bImp.isLeaf) return -1;
-            
-            return bImp.totalDegree - aImp.totalDegree;
-        });
-        
-        const centerX = canvasRect.width / 2;
-        const centerY = canvasRect.height / 2;
-        const maxRadius = Math.min(canvasRect.width, canvasRect.height) * 0.4;
-        
-        sortedNodes.forEach((node, index) => {
-            const imp = nodeImportance[node.id];
-            
-            let radius = maxRadius;
-            if (imp.isRoot || imp.isLeaf) {
-                radius = maxRadius * 0.9;
-            } else if (imp.totalDegree > 2) {
-                radius = maxRadius * 0.6;
-            } else {
-                radius = maxRadius * 0.75;
-            }
-            
-            const angle = (2 * Math.PI * index) / nodeCount - Math.PI / 2;
-            const x = centerX + radius * Math.cos(angle) - 60;
-            const y = centerY + radius * Math.sin(angle) - 20;
-            
-            positions[node.id] = { x, y };
-        });
-        
-        return positions;
-    }
-    
-    forceDirectedLayout(nodes, edges, canvasRect) {
+    improvedForceDirectedLayout(nodes, edges, inDegree, outDegree, canvasRect) {
         const positions = {};
         const velocities = {};
         
-        const centerX = canvasRect.width / 2;
-        const centerY = canvasRect.height / 2;
-        const radius = Math.min(canvasRect.width, canvasRect.height) * 0.35;
+        const NODE_WIDTH = 140;
+        const NODE_HEIGHT = 50;
+        const PADDING = 50;
+        
+        const nodeIds = nodes.map(n => n.id);
+        const nodeCount = nodes.length;
+        
+        const cols = Math.ceil(Math.sqrt(nodeCount));
+        const rows = Math.ceil(nodeCount / cols);
+        
+        const gridWidth = Math.min(canvasRect.width - PADDING * 2, cols * 180);
+        const gridHeight = Math.min(canvasRect.height - PADDING * 2, rows * 120);
+        
+        const startX = (canvasRect.width - gridWidth) / 2;
+        const startY = (canvasRect.height - gridHeight) / 2;
+        
+        const cellWidth = gridWidth / cols;
+        const cellHeight = gridHeight / rows;
         
         nodes.forEach((node, index) => {
-            const angle = (2 * Math.PI * index) / nodes.length - Math.PI / 2;
+            const col = index % cols;
+            const row = Math.floor(index / cols);
+            
             positions[node.id] = {
-                x: centerX + radius * Math.cos(angle) - 60,
-                y: centerY + radius * Math.sin(angle) - 20
+                x: startX + col * cellWidth + (cellWidth - NODE_WIDTH) / 2,
+                y: startY + row * cellHeight + (cellHeight - NODE_HEIGHT) / 2
             };
             velocities[node.id] = { x: 0, y: 0 };
         });
         
-        const edgeMap = {};
-        edges.forEach(edge => {
-            const key = `${edge.source}-${edge.target}`;
-            edgeMap[key] = true;
-        });
-        
-        const iterations = 50;
-        const repulsionStrength = 5000;
-        const attractionStrength = 0.01;
-        const idealEdgeLength = 150;
+        const iterations = 100;
+        const repulsionStrength = 80000;
+        const attractionStrength = 0.02;
+        const idealEdgeLength = 180;
         const damping = 0.85;
         
         for (let iter = 0; iter < iterations; iter++) {
@@ -2716,6 +2687,19 @@ class CausalCanvasApp {
                     const dx = positions[nodeB.id].x - positions[nodeA.id].x;
                     const dy = positions[nodeB.id].y - positions[nodeA.id].y;
                     const distance = Math.sqrt(dx * dx + dy * dy) + 1;
+                    
+                    const minDistance = Math.sqrt(NODE_WIDTH * NODE_WIDTH + NODE_HEIGHT * NODE_HEIGHT) / 2 + 20;
+                    
+                    if (distance < minDistance) {
+                        const pushForce = (minDistance - distance) * 2;
+                        const fx = (dx / distance) * pushForce;
+                        const fy = (dy / distance) * pushForce;
+                        
+                        forces[nodeA.id].x -= fx;
+                        forces[nodeA.id].y -= fy;
+                        forces[nodeB.id].x += fx;
+                        forces[nodeB.id].y += fy;
+                    }
                     
                     const repulsionForce = repulsionStrength / (distance * distance);
                     const fx = (dx / distance) * repulsionForce;
@@ -2755,37 +2739,55 @@ class CausalCanvasApp {
                 
                 positions[node.id].x += velocities[node.id].x;
                 positions[node.id].y += velocities[node.id].y;
+                
+                positions[node.id].x = Math.max(PADDING, Math.min(positions[node.id].x, canvasRect.width - PADDING - NODE_WIDTH));
+                positions[node.id].y = Math.max(PADDING, Math.min(positions[node.id].y, canvasRect.height - PADDING - NODE_HEIGHT));
             });
         }
         
-        const padding = 50;
-        let minX = Infinity, maxX = -Infinity;
-        let minY = Infinity, maxY = -Infinity;
-        
-        nodes.forEach(node => {
-            minX = Math.min(minX, positions[node.id].x);
-            maxX = Math.max(maxX, positions[node.id].x);
-            minY = Math.min(minY, positions[node.id].y);
-            maxY = Math.max(maxY, positions[node.id].y);
-        });
-        
-        const graphWidth = maxX - minX + 120;
-        const graphHeight = maxY - minY + 40;
-        
-        const scaleX = Math.min(1, (canvasRect.width - padding * 2) / graphWidth);
-        const scaleY = Math.min(1, (canvasRect.height - padding * 2) / graphHeight);
-        const scale = Math.min(scaleX, scaleY);
-        
-        const offsetX = (canvasRect.width - graphWidth * scale) / 2 - minX * scale;
-        const offsetY = (canvasRect.height - graphHeight * scale) / 2 - minY * scale;
-        
-        nodes.forEach(node => {
-            positions[node.id].x = positions[node.id].x * scale + offsetX;
-            positions[node.id].y = positions[node.id].y * scale + offsetY;
+        for (let check = 0; check < 10; check++) {
+            let overlaps = false;
             
-            positions[node.id].x = Math.max(padding, Math.min(positions[node.id].x, canvasRect.width - padding - 120));
-            positions[node.id].y = Math.max(padding, Math.min(positions[node.id].y, canvasRect.height - padding - 40));
-        });
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const nodeA = nodes[i];
+                    const nodeB = nodes[j];
+                    
+                    const dx = positions[nodeB.id].x - positions[nodeA.id].x;
+                    const dy = positions[nodeB.id].y - positions[nodeA.id].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    const minDistance = Math.max(NODE_WIDTH, NODE_HEIGHT) * 0.8;
+                    
+                    if (distance < minDistance) {
+                        overlaps = true;
+                        const pushDistance = (minDistance - distance) / 2 + 5;
+                        
+                        if (distance === 0) {
+                            positions[nodeA.id].x -= pushDistance;
+                            positions[nodeA.id].y -= pushDistance;
+                            positions[nodeB.id].x += pushDistance;
+                            positions[nodeB.id].y += pushDistance;
+                        } else {
+                            const fx = (dx / distance) * pushDistance;
+                            const fy = (dy / distance) * pushDistance;
+                            
+                            positions[nodeA.id].x -= fx;
+                            positions[nodeA.id].y -= fy;
+                            positions[nodeB.id].x += fx;
+                            positions[nodeB.id].y += fy;
+                        }
+                        
+                        positions[nodeA.id].x = Math.max(PADDING, Math.min(positions[nodeA.id].x, canvasRect.width - PADDING - NODE_WIDTH));
+                        positions[nodeA.id].y = Math.max(PADDING, Math.min(positions[nodeA.id].y, canvasRect.height - PADDING - NODE_HEIGHT));
+                        positions[nodeB.id].x = Math.max(PADDING, Math.min(positions[nodeB.id].x, canvasRect.width - PADDING - NODE_WIDTH));
+                        positions[nodeB.id].y = Math.max(PADDING, Math.min(positions[nodeB.id].y, canvasRect.height - PADDING - NODE_HEIGHT));
+                    }
+                }
+            }
+            
+            if (!overlaps) break;
+        }
         
         return positions;
     }
