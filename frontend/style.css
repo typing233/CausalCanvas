@@ -1365,3 +1365,24 @@ textarea:focus {
 .settings-group p strong {
     color: #1e293b;
 }
+
+.edge-selected {
+    z-index: 100;
+}
+
+.edge-selected-line {
+    stroke: #ef4444 !important;
+    stroke-width: 3 !important;
+    filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.5));
+}
+
+.edge-selected-label {
+    fill: #dc2626 !important;
+    font-weight: bold !important;
+}
+
+.edge-selected-label-bg {
+    fill: #fee2e2 !important;
+    stroke: #ef4444 !important;
+    stroke-width: 1;
+}
